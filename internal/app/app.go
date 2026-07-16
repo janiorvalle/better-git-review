@@ -75,7 +75,58 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		return err
 	}
 
-	collected, err := defaultSourceRegistry().Collect(ctx, source.Options{
+	collected, err := collectStage(ctx, opts, repoRoot, env, defaultSourceRegistry())
+	if err != nil {
+		return err
+	}
+	files, err := parseStage(collected, logf(env.Stderr))
+	if err != nil {
+		return err
+	}
+
+	selection, err := selectStage(opts, loadedConfig.Config, env.Stderr, defaultProviderRegistry())
+	if err != nil {
+		return err
+	}
+
+	result, err := analyzeWithCacheStage(ctx, analyzeStageInput{
+		Options:   opts,
+		Env:       env,
+		Collected: collected,
+		Files:     files,
+		Selection: selection,
+		Getenv:    os.Getenv,
+	})
+	if err != nil {
+		return err
+	}
+
+	content, err := renderStage(opts.Format, result)
+	if err != nil {
+		return err
+	}
+	outputPath, err := outputPath(opts, collected.Source.Name)
+	if err != nil {
+		return err
+	}
+	if err := emitStage(outputPath, content); err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stderr, "\n  wrote %s\n", outputPath)
+	if opts.Open && opts.Format == "html" {
+		openBrowser(outputPath)
+	}
+	return nil
+}
+
+func collectStage(
+	ctx context.Context,
+	opts options,
+	repoRoot string,
+	env Environment,
+	registry source.Registry,
+) (source.Result, error) {
+	return registry.Collect(ctx, source.Options{
 		PR:       opts.PR,
 		DiffFile: opts.DiffFile,
 		Base:     opts.Base,
@@ -83,136 +134,162 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		Stdin:    env.Stdin,
 		Logf:     logf(env.Stderr),
 	})
-	if err != nil {
-		return err
-	}
+}
+
+func parseStage(collected source.Result, log func(string, ...any)) ([]document.File, error) {
 	if len(bytes.TrimSpace(collected.Diff)) == 0 {
-		return fmt.Errorf("diff is empty; nothing to review")
+		return nil, fmt.Errorf("diff is empty; nothing to review")
 	}
 	files, err := diff.Parse(string(collected.Diff))
 	if err != nil {
-		return fmt.Errorf("parse diff: %w", err)
+		return nil, fmt.Errorf("parse diff: %w", err)
 	}
 	if len(files) == 0 {
-		return fmt.Errorf("could not parse any files from the diff")
+		return nil, fmt.Errorf("could not parse any files from the diff")
 	}
-	logf(env.Stderr)("parsed %d changed file(s)", len(files))
+	log("parsed %d changed file(s)", len(files))
+	return files, nil
+}
 
-	selection, err := defaultProviderRegistry().Select(provider.SelectOptions{
-		Config:        loadedConfig.Config,
+func selectStage(
+	opts options,
+	loaded config.Config,
+	stderr io.Writer,
+	registry provider.Registry,
+) (provider.Selection, error) {
+	selection, err := registry.Select(provider.SelectOptions{
+		Config:        loaded,
 		ModelOverride: opts.Model,
 	})
 	if err != nil {
-		return err
+		return provider.Selection{}, err
 	}
-	fmt.Fprintf(env.Stderr, "  provider: %q / model: %q\n", selection.Provider.Name(), selection.Model)
+	fmt.Fprintf(stderr, "  provider: %q / model: %q\n", selection.Provider.Name(), selection.Model)
+	return selection, nil
+}
 
-	stageDecision, err := analyze.DecideStaging(files, os.Getenv)
+type analyzeStageInput struct {
+	Options   options
+	Env       Environment
+	Collected source.Result
+	Files     []document.File
+	Selection provider.Selection
+	Getenv    func(string) string
+}
+
+func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (document.Document, error) {
+	stageDecision, err := analyze.DecideStaging(input.Files, input.Getenv)
 	if err != nil {
-		return err
+		return document.Document{}, err
 	}
 	if stageDecision.Staged {
-		logf(env.Stderr)("analysis input is %d bytes (budget %d); using staged analysis",
+		logf(input.Env.Stderr)("analysis input is %d bytes (budget %d); using staged analysis",
 			stageDecision.InputBytes, stageDecision.Budget)
 	}
 
-	cacheStore, err := cache.Default(func(value document.Document) error {
-		if validationErrors := analyze.ValidateComplete(value.Analysis, len(value.Files)); len(validationErrors) > 0 {
-			return fmt.Errorf("%s", analyze.FormatErrors(validationErrors))
-		}
-		return nil
-	})
+	cacheStore, err := cache.Default(validateCachedDocument)
 	if err != nil {
-		return err
+		return document.Document{}, err
 	}
-	cacheKey := cache.Key(collected.Diff, selection.Provider.Name(), selection.Model, document.SchemaVersion)
+	cacheKey := cache.Key(
+		input.Collected.Diff,
+		input.Selection.Provider.Name(),
+		input.Selection.Model,
+		document.SchemaVersion,
+	)
 	var result document.Document
-	if !opts.NoCache {
-		if cached, ok := cacheStore.Load(cacheKey); ok {
-			if cached.Meta.Staged == stageDecision.Staged &&
-				len(analyze.ValidateComplete(cached.Analysis, len(files))) == 0 {
-				logf(env.Stderr)("cache hit")
-				cached.Source = collected.Source
-				cached.Files = files
-				result = cached
-			}
+	if !input.Options.NoCache {
+		if cached, ok := cacheStore.Load(cacheKey); ok && cached.Meta.Staged == stageDecision.Staged {
+			logf(input.Env.Stderr)("cache hit")
+			cached.Source = input.Collected.Source
+			cached.Files = input.Files
+			result = cached
 		}
 	}
 	if result.SchemaVersion == 0 {
 		if err := guard.Confirm(
-			guard.AnalysisPlan(len(files), stageDecision.Staged, selection.Provider.Name(), selection.Model),
-			opts.Yes,
-			env.Stdin,
-			env.Stderr,
-			isTTY(env.Stdin),
+			guard.AnalysisPlan(
+				len(input.Files),
+				stageDecision.Staged,
+				input.Selection.Provider.Name(),
+				input.Selection.Model,
+			),
+			input.Options.Yes,
+			input.Env.Stdin,
+			input.Env.Stderr,
+			isTTY(input.Env.Stdin),
 		); err != nil {
-			return err
+			return document.Document{}, err
 		}
 		analysis, analysisErr := analyze.Run(ctx, analyze.Options{
-			Provider: selection.Provider,
-			Source:   collected.Source,
-			Files:    files,
-			Logf:     logf(env.Stderr),
+			Provider: input.Selection.Provider,
+			Source:   input.Collected.Source,
+			Files:    input.Files,
+			Logf:     logf(input.Env.Stderr),
 			Staged:   stageDecision.Staged,
 			Budget:   stageDecision.Budget,
 		})
 		if analysisErr != nil {
-			return analysisErr
+			return document.Document{}, analysisErr
 		}
 		result = document.Document{
 			SchemaVersion: document.SchemaVersion,
-			Source:        collected.Source,
-			Files:         files,
+			Source:        input.Collected.Source,
+			Files:         input.Files,
 			Analysis:      analysis,
 			Meta: document.Meta{
-				Provider:  selection.Provider.Name(),
-				Model:     selection.Model,
+				Provider:  input.Selection.Provider.Name(),
+				Model:     input.Selection.Model,
 				Generator: document.Generator(),
 				Cached:    false,
 				Staged:    stageDecision.Staged,
 			},
 		}
-		if !opts.NoCache {
+		if !input.Options.NoCache {
 			if err := cacheStore.Store(cacheKey, result); err != nil {
-				return fmt.Errorf("write cache: %w", err)
+				return document.Document{}, fmt.Errorf("write cache: %w", err)
 			}
 		}
 	}
-	logf(env.Stderr)("organized into %d cohort(s)", len(result.Analysis.Cohorts))
-	if opts.PR == "" && opts.DiffFile == "" {
+	logf(input.Env.Stderr)("organized into %d cohort(s)", len(result.Analysis.Cohorts))
+	if input.Options.PR == "" && input.Options.DiffFile == "" {
 		if result.Source.Range == "HEAD (uncommitted)" {
 			blame.EnrichUncommitted(ctx, result.Source.RepoDir, result.Files, nil)
 		} else {
 			blame.Enrich(ctx, result.Source.RepoDir, result.Files, nil)
 		}
 	}
+	return result, nil
+}
 
-	outputPath := opts.Out
-	if outputPath == "" {
-		outputPath = "walkthrough-" + collected.Source.Name + "." + opts.Format
-	}
-	outputPath, err = filepath.Abs(outputPath)
-	if err != nil {
-		return err
-	}
-	if opts.Format == "json" {
-		if err := writeDocument(outputPath, result); err != nil {
-			return err
-		}
-	} else {
-		htmlOutput, renderErr := viewer.Render(result)
-		if renderErr != nil {
-			return renderErr
-		}
-		if err := writeOutput(outputPath, htmlOutput); err != nil {
-			return err
-		}
-	}
-	fmt.Fprintf(env.Stderr, "\n  wrote %s\n", outputPath)
-	if opts.Open && opts.Format == "html" {
-		openBrowser(outputPath)
+func validateCachedDocument(value document.Document) error {
+	if validationErrors := analyze.ValidateComplete(value.Analysis, len(value.Files)); len(validationErrors) > 0 {
+		return fmt.Errorf("%s", analyze.FormatErrors(validationErrors))
 	}
 	return nil
+}
+
+func renderStage(format string, value document.Document) ([]byte, error) {
+	if format == "json" {
+		encoded, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		return append(encoded, '\n'), nil
+	}
+	return viewer.Render(value)
+}
+
+func outputPath(opts options, sourceName string) (string, error) {
+	path := opts.Out
+	if path == "" {
+		path = "walkthrough-" + sourceName + "." + opts.Format
+	}
+	return filepath.Abs(path)
+}
+
+func emitStage(path string, content []byte) error {
+	return writeOutput(path, content)
 }
 
 func parseArgs(args []string, env Environment) (options, error) {
@@ -280,14 +357,6 @@ func parseArgs(args []string, env Environment) (options, error) {
 func isPRNumber(value string) bool {
 	number, err := strconv.Atoi(value)
 	return err == nil && number >= 0 && !strings.HasPrefix(value, "-")
-}
-
-func writeDocument(path string, value document.Document) error {
-	encoded, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeOutput(path, append(encoded, '\n'))
 }
 
 func writeOutput(path string, content []byte) error {
