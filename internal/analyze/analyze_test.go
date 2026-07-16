@@ -3,6 +3,7 @@ package analyze
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -71,6 +72,35 @@ func TestRunHardFailureWritesDebugOutput(t *testing.T) {
 	}
 	if string(data) != "still not json" {
 		t.Fatalf("debug output = %q", data)
+	}
+}
+
+type failingProvider struct {
+	calls int
+}
+
+func (p *failingProvider) Name() string { return "failing" }
+func (p *failingProvider) Detect() (bool, string) {
+	return true, "test"
+}
+func (p *failingProvider) Complete(context.Context, string) (string, error) {
+	p.calls++
+	return "", errors.New("authentication failed")
+}
+
+func TestRunDoesNotRetryProviderExecutionFailure(t *testing.T) {
+	provider := &failingProvider{}
+	_, err := Run(context.Background(), Options{
+		Provider: provider,
+		Source:   document.Source{Title: "test"},
+		Files:    []document.File{{Path: "a.go"}},
+		StateDir: t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider called %d times, want 1", provider.calls)
 	}
 }
 

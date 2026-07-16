@@ -41,9 +41,7 @@ func Run(ctx context.Context, opts Options) (document.Analysis, error) {
 		if structured, ok := opts.Provider.(provider.StructuredProvider); ok {
 			raw, err := structured.CompleteStructured(ctx, attemptPrompt, Schema)
 			if err != nil {
-				lastRaw = string(raw)
-				lastErrors = []string{err.Error()}
-				continue
+				return document.Analysis{}, fmt.Errorf("%s provider failed: %w", opts.Provider.Name(), err)
 			}
 			lastRaw = string(raw)
 			if err := json.Unmarshal(raw, &analysis); err != nil {
@@ -54,8 +52,7 @@ func Run(ctx context.Context, opts Options) (document.Analysis, error) {
 			raw, err := opts.Provider.Complete(ctx, attemptPrompt)
 			lastRaw = raw
 			if err != nil {
-				lastErrors = []string{err.Error()}
-				continue
+				return document.Analysis{}, fmt.Errorf("%s provider failed: %w", opts.Provider.Name(), err)
 			}
 			analysis, err = ParseResponse(raw)
 			if err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -80,6 +81,20 @@ func TestFingerprintStableAndChanges(t *testing.T) {
 	changedHash, _ := Fingerprint(second)
 	if changedHash == firstHash {
 		t.Fatal("provider change did not change fingerprint")
+	}
+}
+
+func TestDescribeProviderSettingsEscapesControlCharacters(t *testing.T) {
+	description := DescribeProviderSettings(Config{
+		Providers: map[string]ProviderConfig{
+			"evil\x1b[2J": {BaseURL: "https://example.invalid"},
+		},
+	})
+	if strings.Contains(description, "\x1b") {
+		t.Fatalf("description contains a raw escape character: %q", description)
+	}
+	if !strings.Contains(description, `\x1b`) {
+		t.Fatalf("description did not visibly escape the provider name: %q", description)
 	}
 }
 

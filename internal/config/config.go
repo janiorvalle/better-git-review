@@ -178,7 +178,7 @@ func DescribeProviderSettings(cfg Config) string {
 	sort.Strings(names)
 	for _, name := range names {
 		value := cfg.Providers[name]
-		lines = append(lines, fmt.Sprintf("[providers.%s]", name))
+		lines = append(lines, fmt.Sprintf("[providers.%q]", name))
 		if value.Model != "" {
 			lines = append(lines, fmt.Sprintf("model = %q", value.Model))
 		}
@@ -209,7 +209,7 @@ func ensureRepoTrust(opts LoadOptions, repoCfg Config) error {
 		return nil
 	}
 
-	fmt.Fprintf(opts.Output, "Repository config at %s requests provider settings:\n%s\n", repoPath, DescribeProviderSettings(repoCfg))
+	fmt.Fprintf(opts.Output, "Repository config at %q requests provider settings:\n%s\n", repoPath, DescribeProviderSettings(repoCfg))
 	if !opts.AcceptRepoTrust && !opts.Yes {
 		if !opts.InputIsTTY {
 			return fmt.Errorf("repo config is not trusted; rerun with --trust-repo-config or --yes to accept it")
