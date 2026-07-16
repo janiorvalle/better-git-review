@@ -547,7 +547,7 @@ body[data-view="split"] .view-split { display: block; }
   </div>
 </div>
 <script id="walkthrough-data" type="application/json">{"schemaVersion":2,"source":{"title":"gate-m2-go-mod.patch","description":"","range":"artifacts/gate-m2-go-mod.patch","url":null,"name":"gate-m2-go-mod","repoDir":""},"files":[{"path":"go.mod","oldPath":"go.mod","newPath":"go.mod","status":"modified","binary":false,"additions":6,"deletions":1,"hunks":[{"header":"module github.com/janiorvalle/better-git-review","lines":[{"t":"c","old":2,"new":2,"text":""},{"t":"c","old":3,"new":3,"text":"go 1.24"},{"t":"c","old":4,"new":4,"text":""},{"t":"d","old":5,"new":0,"text":"require github.com/BurntSushi/toml v1.5.0"},{"t":"a","old":0,"new":5,"text":"require ("},{"t":"a","old":0,"new":6,"text":"\tgithub.com/BurntSushi/toml v1.5.0"},{"t":"a","old":0,"new":7,"text":"\tgithub.com/alecthomas/chroma/v2 v2.24.1"},{"t":"a","old":0,"new":8,"text":")"},{"t":"a","old":0,"new":9,"text":""},{"t":"a","old":0,"new":10,"text":"require github.com/dlclark/regexp2 v1.12.0 // indirect"}]}]}],"analysis":{"title":"[MOCK] Guided review","overview":"Mock analysis: files were grouped by path heuristics only.","mermaid":"graph LR\n  A[Mock mode] --\u003e B[No LLM analysis]","cohorts":[{"title":"Backend changes","layer":"backend","intent":"[mock] Files grouped heuristically as backend.","narrative":"[mock mode] This grouping was produced by path heuristics, not an LLM.","files":[0],"fileSummaries":["[mock] modified, +6/-1"],"reviewNotes":[],"dependsOn":[]}]},"meta":{"provider":"mock","model":"deterministic","generator":"better-git-review v0.2.0","cached":false}}</script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
+<script id="mermaid-script" src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" async></script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   var steps = Array.from(document.querySelectorAll(".step"));
@@ -626,13 +626,23 @@ document.addEventListener("DOMContentLoaded", function () {
 
   setView(storedView);
   go(0);
+});
+
+function renderMermaid() {
   if (window.mermaid) {
     try {
       window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "neutral" });
-      window.mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+      var rendering = window.mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+      if (rendering && typeof rendering.catch === "function") rendering.catch(function () {});
     } catch (_) {}
   }
-});
+}
+var mermaidScript = document.getElementById("mermaid-script");
+if (window.mermaid) {
+  renderMermaid();
+} else if (mermaidScript) {
+  mermaidScript.addEventListener("load", renderMermaid);
+}
 </script>
 </body>
 </html>

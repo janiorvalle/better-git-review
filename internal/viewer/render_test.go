@@ -47,6 +47,11 @@ func TestRenderEscapesHostileData(t *testing.T) {
 	if strings.Count(html, "<script") != 3 {
 		t.Fatalf("unexpected script tags in output: %d", strings.Count(html, "<script"))
 	}
+	if !strings.Contains(html, `id="mermaid-script"`) ||
+		!strings.Contains(html, `mermaid.min.js" async`) ||
+		strings.Contains(html, `mermaid.min.js" defer`) {
+		t.Fatal("Mermaid must load without blocking viewer initialization")
+	}
 	island := extractIsland(t, html)
 	var decoded document.Document
 	if err := json.Unmarshal([]byte(island), &decoded); err != nil {

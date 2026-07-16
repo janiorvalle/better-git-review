@@ -285,7 +285,7 @@ body[data-view="split"] .view-split { display: block; }
   </div>
 </div>
 <script id="walkthrough-data" type="application/json">{{.JSON}}</script>
-{{if .Mermaid}}<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>{{end}}
+{{if .Mermaid}}<script id="mermaid-script" src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" async></script>{{end}}
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   var steps = Array.from(document.querySelectorAll(".step"));
@@ -364,13 +364,23 @@ document.addEventListener("DOMContentLoaded", function () {
 
   setView(storedView);
   go(0);
+});
+
+function renderMermaid() {
   if (window.mermaid) {
     try {
       window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "neutral" });
-      window.mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+      var rendering = window.mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+      if (rendering && typeof rendering.catch === "function") rendering.catch(function () {});
     } catch (_) {}
   }
-});
+}
+var mermaidScript = document.getElementById("mermaid-script");
+if (window.mermaid) {
+  renderMermaid();
+} else if (mermaidScript) {
+  mermaidScript.addEventListener("load", renderMermaid);
+}
 </script>
 </body>
 </html>
