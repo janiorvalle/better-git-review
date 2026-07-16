@@ -23,15 +23,17 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(temp)
 	binaryPath = filepath.Join(temp, "better-git-review")
 	command := exec.Command("go", "build", "-o", binaryPath, "../../cmd/better-git-review")
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	if err := command.Run(); err != nil {
+		_ = os.RemoveAll(temp)
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	status := m.Run()
+	_ = os.RemoveAll(temp)
+	os.Exit(status)
 }
 
 func TestHappyPath(t *testing.T) {

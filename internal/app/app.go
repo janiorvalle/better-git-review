@@ -111,7 +111,8 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	if !opts.NoCache {
 		if cached, ok := cacheStore.Load(cacheKey); ok {
 			if cached.Source.Title == collected.Source.Title &&
-				cached.Source.Description == collected.Source.Description {
+				cached.Source.Description == collected.Source.Description &&
+				len(analyze.ValidateComplete(cached.Analysis, len(files))) == 0 {
 				logf(env.Stderr)("cache hit")
 				cached.Source = collected.Source
 				cached.Files = files

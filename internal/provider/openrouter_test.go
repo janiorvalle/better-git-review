@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -82,5 +83,36 @@ func TestOpenRouterEscapesConfiguredEnvironmentName(t *testing.T) {
 	}
 	if strings.Contains(detail, "\x1b") || !strings.Contains(detail, `\x1b`) {
 		t.Fatalf("environment name was not escaped: %q", detail)
+	}
+}
+
+func TestOpenRouterStructuredRequestRequiresSupportedParameters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			response.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		providerOptions, ok := body["provider"].(map[string]any)
+		if !ok || providerOptions["require_parameters"] != true {
+			t.Errorf("structured request did not require parameter support: %#v", body)
+			response.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{
+			"choices":[{"finish_reason":"stop","message":{"content":"{\"title\":\"ok\"}"}}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := &OpenRouter{
+		Model: "test", APIKeyEnv: "TEST_KEY", BaseURL: server.URL,
+		Getenv: func(string) string { return "secret" },
+		Client: server.Client(),
+	}
+	if _, err := provider.CompleteStructured(context.Background(), "prompt", json.RawMessage(`{"type":"object"}`)); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -55,6 +55,9 @@ func (p *OpenRouter) complete(ctx context.Context, prompt string, schema json.Ra
 		},
 	}
 	if schema != nil {
+		requestBody["provider"] = map[string]any{
+			"require_parameters": true,
+		}
 		requestBody["response_format"] = map[string]any{
 			"type": "json_schema",
 			"json_schema": map[string]any{
