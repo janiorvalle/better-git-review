@@ -128,6 +128,9 @@ func Validate(analysis document.Analysis, fileCount int) []string {
 func ValidateComplete(analysis document.Analysis, fileCount int) []string {
 	errors := validateRequiredContent(analysis)
 	errors = append(errors, Validate(analysis, fileCount)...)
+	if analysis.StubbedFiles == nil {
+		errors = append(errors, "stubbedFiles must be present")
+	}
 	seenStub := map[int]bool{}
 	for _, fileIndex := range analysis.StubbedFiles {
 		if fileIndex < 0 || fileIndex >= fileCount {

@@ -30,11 +30,14 @@ func TestCacheRoundTripAndCorruption(t *testing.T) {
 	value := document.Document{
 		SchemaVersion: document.SchemaVersion,
 		Files:         []document.File{{Path: "a.go"}},
-		Analysis: document.Analysis{Title: "Change", Overview: "Overview", Cohorts: []document.Cohort{{
-			Title: "Backend", Layer: "backend", Intent: "Change backend", Narrative: "Review the backend change.",
-			Files:         []int{0},
-			FileSummaries: []string{"changed"}, ReviewNotes: []string{}, DependsOn: []int{},
-		}}},
+		Analysis: document.Analysis{
+			Title: "Change", Overview: "Overview", StubbedFiles: []int{},
+			Cohorts: []document.Cohort{{
+				Title: "Backend", Layer: "backend", Intent: "Change backend", Narrative: "Review the backend change.",
+				Files:         []int{0},
+				FileSummaries: []string{"changed"}, ReviewNotes: []string{}, DependsOn: []int{},
+			}},
+		},
 		Meta: document.Meta{Cached: false},
 	}
 	if err := store.Store(key, value); err != nil {

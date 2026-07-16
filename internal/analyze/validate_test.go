@@ -107,6 +107,23 @@ func TestApplySeatbeltsRemapsDependenciesAfterDroppingCohorts(t *testing.T) {
 	}
 }
 
+func TestValidateCompleteRequiresStubbedFiles(t *testing.T) {
+	analysis := validAnalysis()
+	analysis.Title = "Change"
+	analysis.Overview = "Overview"
+	for index := range analysis.Cohorts {
+		analysis.Cohorts[index].Intent = "Intent"
+		analysis.Cohorts[index].Narrative = "Narrative"
+	}
+	if errors := ValidateComplete(analysis, 2); !containsSubstring(errors, "stubbedFiles must be present") {
+		t.Fatalf("missing required-array error: %#v", errors)
+	}
+	analysis.StubbedFiles = []int{}
+	if errors := ValidateComplete(analysis, 2); len(errors) != 0 {
+		t.Fatalf("empty stubbedFiles should be valid: %#v", errors)
+	}
+}
+
 func containsSubstring(values []string, substring string) bool {
 	for _, value := range values {
 		if strings.Contains(value, substring) {
