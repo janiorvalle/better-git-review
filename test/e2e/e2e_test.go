@@ -337,6 +337,43 @@ func TestCache(t *testing.T) {
 	}
 }
 
+func TestCacheDoesNotCrossAnalysisStrategies(t *testing.T) {
+	baseEnv := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "strategy.json")
+	args := []string{
+		"--diff", fixturePath(t), "--provider", "mock",
+		"--format", "json", "--out", output,
+	}
+	singleEnv := setEnv(baseEnv, "BGR_STAGE_BUDGET", "999999")
+	first := runCLI(t, singleEnv, nil, args...)
+	if first.err != nil {
+		t.Fatalf("single-pass command failed: %v\n%s", first.err, first.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Staged {
+		t.Fatal("first run unexpectedly staged")
+	}
+
+	stagedEnv := setEnv(baseEnv, "BGR_STAGE_BUDGET", "1")
+	second := runCLI(t, stagedEnv, nil, args...)
+	if second.err != nil {
+		t.Fatalf("staged command failed: %v\n%s", second.err, second.stderr)
+	}
+	if doc := readAndValidate(t, output); !doc.Meta.Staged || doc.Meta.Cached {
+		t.Fatalf("single-pass cache crossed into staged run: %#v", doc.Meta)
+	}
+	if strings.Contains(second.stderr, "cache hit") {
+		t.Fatal("staged run reused single-pass cache")
+	}
+
+	third := runCLI(t, singleEnv, nil, args...)
+	if third.err != nil {
+		t.Fatalf("second single-pass command failed: %v\n%s", third.err, third.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Staged || doc.Meta.Cached {
+		t.Fatalf("staged cache crossed into single-pass run: %#v", doc.Meta)
+	}
+}
+
 func TestCacheReusesIdenticalDiffWithCurrentSourceMetadata(t *testing.T) {
 	env := isolatedEnvironment(t)
 	temp := t.TempDir()

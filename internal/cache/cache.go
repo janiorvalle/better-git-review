@@ -47,6 +47,14 @@ func (c Cache) Load(key string) (document.Document, bool) {
 	if err := json.Unmarshal(data, &result); err != nil {
 		return document.Document{}, false
 	}
+	var required struct {
+		Meta struct {
+			Staged *bool `json:"staged"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(data, &required); err != nil || required.Meta.Staged == nil {
+		return document.Document{}, false
+	}
 	if result.SchemaVersion != document.SchemaVersion {
 		return document.Document{}, false
 	}
