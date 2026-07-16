@@ -21,6 +21,7 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/config"
 	"github.com/janiorvalle/better-git-review/internal/diff"
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/fileutil"
 	"github.com/janiorvalle/better-git-review/internal/guard"
 	"github.com/janiorvalle/better-git-review/internal/provider"
 	"github.com/janiorvalle/better-git-review/internal/source"
@@ -44,6 +45,7 @@ type options struct {
 	Out             string
 	Format          string
 	Open            bool
+	Dirty           bool
 	NoCache         bool
 	Yes             bool
 	TrustRepoConfig bool
@@ -130,6 +132,7 @@ func collectStage(
 		PR:       opts.PR,
 		DiffFile: opts.DiffFile,
 		Base:     opts.Base,
+		Dirty:    opts.Dirty,
 		RepoDir:  repoRoot,
 		Stdin:    env.Stdin,
 		Logf:     logf(env.Stderr),
@@ -315,6 +318,7 @@ func parseArgs(args []string, env Environment) (options, error) {
 	flags.StringVar(&result.Out, "out", "", "output path")
 	flags.StringVar(&result.Format, "format", "html", "output format: html or json")
 	flags.BoolVar(&result.Open, "open", false, "open generated HTML in the default browser")
+	flags.BoolVar(&result.Dirty, "dirty", false, "review only uncommitted changes (git diff HEAD)")
 	flags.BoolVar(&result.NoCache, "no-cache", false, "bypass analysis cache")
 	flags.BoolVar(&result.Yes, "yes", false, "skip confirmations")
 	flags.BoolVar(&result.TrustRepoConfig, "trust-repo-config", false, "trust current repo provider config")
@@ -343,6 +347,9 @@ func parseArgs(args []string, env Environment) (options, error) {
 	}
 	if result.Base != "" && (result.PR != "" || result.DiffFile != "") {
 		return options{}, fmt.Errorf("--base cannot be used with PR_NUMBER or --diff")
+	}
+	if result.Dirty && (result.PR != "" || result.DiffFile != "" || result.Base != "") {
+		return options{}, fmt.Errorf("--dirty cannot be used with PR_NUMBER, --diff, or --base")
 	}
 	if result.Format != "html" && result.Format != "json" {
 		return options{}, fmt.Errorf("--format must be html or json")
@@ -373,23 +380,32 @@ func writeOutput(path string, content []byte) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tempName, path); err != nil {
+	if err := fileutil.Replace(tempName, path); err != nil {
 		return fmt.Errorf("write output %q: %w", path, err)
 	}
 	return nil
 }
 
 func openBrowser(path string) {
-	var command *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		command = exec.Command("open", path)
-	case "linux":
-		command = exec.Command("xdg-open", path)
-	default:
+	name, args, ok := browserCommand(runtime.GOOS, path)
+	if !ok {
 		return
 	}
+	command := exec.Command(name, args...)
 	_ = command.Run()
+}
+
+func browserCommand(goos, path string) (string, []string, bool) {
+	switch goos {
+	case "darwin":
+		return "open", []string{path}, true
+	case "linux":
+		return "xdg-open", []string{path}, true
+	case "windows":
+		return "cmd", []string{"/c", "start", "", path}, true
+	default:
+		return "", nil, false
+	}
 }
 
 func fillEnvironment(env Environment) Environment {
@@ -423,15 +439,16 @@ func logf(output io.Writer) func(string, ...any) {
 	}
 }
 
-const usage = `better-git-review - turn a diff into a guided review document
+const usage = `bgr - turn a diff into a guided review document
 
 USAGE
-  better-git-review [PR_NUMBER] [flags]
+  bgr [PR_NUMBER] [flags]
 
 SOURCES
   PR_NUMBER              GitHub PR via gh
   --diff <file|->        Unified diff file or stdin
   --base <ref>           Diff <ref>...HEAD (auto-detected by default)
+  --dirty                Review only uncommitted changes (git diff HEAD)
 
 FLAGS
   -C <dir>               Repository directory (default: cwd)

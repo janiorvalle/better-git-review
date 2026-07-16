@@ -3,6 +3,22 @@ version: 2
 project_name: better-git-review
 
 builds:
+  - id: bgr
+    main: ./cmd/bgr
+    binary: bgr
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/janiorvalle/better-git-review/internal/document.Version={{ .Version }}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
   - id: better-git-review
     main: ./cmd/better-git-review
     binary: better-git-review
@@ -22,6 +38,7 @@ builds:
 
 archives:
   - ids:
+      - bgr
       - better-git-review
     formats:
       - tar.gz

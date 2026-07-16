@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,6 +34,9 @@ func TestParseArgsRejectsConflictingSources(t *testing.T) {
 		{"123", "--base", "main"},
 		{"--diff", "change.patch", "--base", "main"},
 		{"123", "--diff", "change.patch"},
+		{"123", "--dirty"},
+		{"--diff", "change.patch", "--dirty"},
+		{"--base", "main", "--dirty"},
 	}
 	for _, args := range tests {
 		if _, err := parseArgs(args, Environment{
@@ -41,6 +45,28 @@ func TestParseArgsRejectsConflictingSources(t *testing.T) {
 		}); err == nil {
 			t.Fatalf("expected conflicting args to fail: %#v", args)
 		}
+	}
+}
+
+func TestBrowserCommandDispatch(t *testing.T) {
+	tests := []struct {
+		goos string
+		name string
+		args []string
+		ok   bool
+	}{
+		{goos: "darwin", name: "open", args: []string{"review.html"}, ok: true},
+		{goos: "linux", name: "xdg-open", args: []string{"review.html"}, ok: true},
+		{goos: "windows", name: "cmd", args: []string{"/c", "start", "", "review.html"}, ok: true},
+		{goos: "plan9", ok: false},
+	}
+	for _, test := range tests {
+		t.Run(test.goos, func(t *testing.T) {
+			name, args, ok := browserCommand(test.goos, "review.html")
+			if name != test.name || !slices.Equal(args, test.args) || ok != test.ok {
+				t.Fatalf("got %q %#v %v", name, args, ok)
+			}
+		})
 	}
 }
 

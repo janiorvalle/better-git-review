@@ -16,6 +16,7 @@ type Options struct {
 	PR       string
 	DiffFile string
 	Base     string
+	Dirty    bool
 	RepoDir  string
 	Stdin    io.Reader
 	Logf     func(string, ...any)
