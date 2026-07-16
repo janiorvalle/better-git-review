@@ -156,6 +156,9 @@ func TestChromaThemeUsesCompleteVariablePaletteWithoutBackgrounds(t *testing.T) 
 	if strings.Contains(combined, "background") {
 		t.Fatalf("generated Chroma theme still sets backgrounds:\n%s", combined)
 	}
+	if strings.Contains(combined, ": ;") {
+		t.Fatalf("generated Chroma theme contains an empty variable:\n%s", combined)
+	}
 	variablePattern := regexp.MustCompile(`var\((--chroma-[^)]+)\)`)
 	for _, match := range variablePattern.FindAllStringSubmatch(string(theme.TokenCSS), -1) {
 		variable := match[1] + ":"

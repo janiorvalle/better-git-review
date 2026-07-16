@@ -382,7 +382,13 @@ func buildChromaTheme(lightCSS, darkCSS string) ChromaTheme {
 	sort.Strings(selectors)
 
 	lightFallback := lightRules[".chroma"].color
+	if lightFallback == "" {
+		lightFallback = "#1f2328"
+	}
 	darkFallback := darkRules[".chroma"].color
+	if darkFallback == "" {
+		darkFallback = "#e6edf3"
+	}
 	var tokens, lightVariables, darkVariables strings.Builder
 	for _, selector := range selectors {
 		lightRule := lightRules[selector]
