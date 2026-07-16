@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/janiorvalle/better-git-review/internal/cache"
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
@@ -39,7 +41,7 @@ func TestMain(m *testing.M) {
 func TestHappyPath(t *testing.T) {
 	env := isolatedEnvironment(t)
 	output := filepath.Join(t.TempDir(), "out.json")
-	result := runCLI(t, env, nil, "--diff", fixturePath(t), "--provider", "mock", "--out", output)
+	result := runCLI(t, env, nil, "--diff", fixturePath(t), "--provider", "mock", "--format", "json", "--out", output)
 	if result.err != nil {
 		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
 	}
@@ -47,15 +49,156 @@ func TestHappyPath(t *testing.T) {
 	if doc.Meta.Cached {
 		t.Fatal("first run should not be cached")
 	}
-	if doc.Meta.Provider != "mock" || doc.SchemaVersion != 1 {
+	if doc.Meta.Provider != "mock" || doc.SchemaVersion != 2 {
 		t.Fatalf("unexpected metadata: %#v", doc.Meta)
+	}
+}
+
+func TestHTMLHappyPathAndSelfContainment(t *testing.T) {
+	env := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "out.html")
+	result := runCLI(t, env, nil,
+		"--diff", viewerFixturePath(t), "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	for _, expected := range []string{
+		`id="walkthrough-data"`,
+		`class="step-nav-button`,
+		`class="view-unified`,
+		`class="view-split`,
+		`class="fold-button`,
+		`data-view-target="unified"`,
+		`data-view-target="split"`,
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("HTML missing %q", expected)
+		}
+	}
+	if strings.Count(html, `<section class="step`) != len(doc.Analysis.Cohorts)+1 {
+		t.Fatalf("HTML does not contain every cohort section")
+	}
+	assertSelfContained(t, html)
+}
+
+func TestHTMLHostilePatchIsInert(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "hostile.html")
+	result := runCLI(t, isolatedEnvironment(t), nil,
+		"--diff", hostileFixturePath(t), "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(data)
+	for _, unsafe := range []string{
+		`</script><script>alert(1)</script>`,
+		`<img src=x onerror=alert(2)>`,
+	} {
+		if strings.Contains(html, unsafe) {
+			t.Fatalf("hostile payload reached HTML: %s", unsafe)
+		}
+	}
+	readHTMLDocument(t, output)
+}
+
+func TestFormatJSON(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "out.json")
+	result := runCLI(t, isolatedEnvironment(t), nil,
+		"--diff", fixturePath(t), "--provider", "mock", "--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("<!doctype")) {
+		t.Fatal("--format json wrote HTML")
+	}
+	doc := readAndValidate(t, output)
+	if doc.SchemaVersion != 2 {
+		t.Fatalf("schema version = %d", doc.SchemaVersion)
+	}
+}
+
+func TestBlameLocalGitOnly(t *testing.T) {
+	repo := initializeRepo(t)
+	runGit(t, repo, "config", "user.name", "Alice Base")
+	runGit(t, repo, "switch", "-c", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("changed by Bob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "config", "user.name", "Bob Feature")
+	runGit(t, repo, "add", "base.txt")
+	runGit(t, repo, "commit", "-m", "feature")
+
+	output := filepath.Join(t.TempDir(), "blame.json")
+	result := runCLI(t, isolatedEnvironment(t), nil,
+		"-C", repo, "--base", "main", "--provider", "mock", "--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	doc := readAndValidate(t, output)
+	if doc.Files[0].Hunks[0].Blame == nil || doc.Files[0].Hunks[0].Blame.Author != "Bob Feature" {
+		t.Fatalf("unexpected local blame: %#v", doc.Files[0].Hunks[0].Blame)
+	}
+
+	patchOutput := filepath.Join(t.TempDir(), "patch.json")
+	patchRun := runCLI(t, isolatedEnvironment(t), nil,
+		"--diff", fixturePath(t), "--provider", "mock", "--format", "json", "--out", patchOutput)
+	if patchRun.err != nil {
+		t.Fatalf("patch command failed: %v\n%s", patchRun.err, patchRun.stderr)
+	}
+	patchDoc := readAndValidate(t, patchOutput)
+	for _, file := range patchDoc.Files {
+		for _, hunk := range file.Hunks {
+			if hunk.Blame != nil {
+				t.Fatalf("patch mode unexpectedly carried blame: %#v", hunk.Blame)
+			}
+		}
+	}
+}
+
+func TestCacheSchemaBumpDoesNotReuseV1(t *testing.T) {
+	env := isolatedEnvironment(t)
+	stateHome := envValue(env, "XDG_STATE_HOME")
+	diffBytes, err := os.ReadFile(fixturePath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1Key := cache.Key(diffBytes, "mock", "deterministic", 1)
+	cacheDir := filepath.Join(stateHome, "better-git-review", "cache")
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := document.Document{SchemaVersion: 1}
+	staleBytes, _ := json.Marshal(stale)
+	if err := os.WriteFile(filepath.Join(cacheDir, v1Key+".json"), staleBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "out.json")
+	result := runCLI(t, env, nil,
+		"--diff", fixturePath(t), "--provider", "mock", "--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	doc := readAndValidate(t, output)
+	if doc.Meta.Cached || strings.Contains(result.stderr, "cache hit") {
+		t.Fatal("v1 cache entry was reused")
+	}
+	if cache.Key(diffBytes, "mock", "deterministic", 2) == v1Key {
+		t.Fatal("schema bump did not change cache key")
 	}
 }
 
 func TestCache(t *testing.T) {
 	env := isolatedEnvironment(t)
 	output := filepath.Join(t.TempDir(), "out.json")
-	args := []string{"--diff", fixturePath(t), "--provider", "mock", "--out", output}
+	args := []string{"--diff", fixturePath(t), "--provider", "mock", "--format", "json", "--out", output}
 	first := runCLI(t, env, nil, args...)
 	if first.err != nil {
 		t.Fatalf("first command failed: %v\n%s", first.err, first.stderr)
@@ -99,11 +242,11 @@ func TestCacheReusesIdenticalDiffWithCurrentSourceMetadata(t *testing.T) {
 	}
 	firstOutput := filepath.Join(temp, "first.json")
 	secondOutput := filepath.Join(temp, "second.json")
-	first := runCLI(t, env, nil, "--diff", firstPatch, "--provider", "mock", "--out", firstOutput)
+	first := runCLI(t, env, nil, "--diff", firstPatch, "--provider", "mock", "--format", "json", "--out", firstOutput)
 	if first.err != nil {
 		t.Fatalf("first command failed: %v\n%s", first.err, first.stderr)
 	}
-	second := runCLI(t, env, nil, "--diff", secondPatch, "--provider", "mock", "--out", secondOutput)
+	second := runCLI(t, env, nil, "--diff", secondPatch, "--provider", "mock", "--format", "json", "--out", secondOutput)
 	if second.err != nil {
 		t.Fatalf("second command failed: %v\n%s", second.err, second.stderr)
 	}
@@ -123,7 +266,7 @@ func TestStdin(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(t.TempDir(), "stdin.json")
-	result := runCLI(t, env, patch, "--diff", "-", "--provider", "mock", "--out", output)
+	result := runCLI(t, env, patch, "--diff", "-", "--provider", "mock", "--format", "json", "--out", output)
 	if result.err != nil {
 		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
 	}
@@ -146,7 +289,7 @@ func TestGitSources(t *testing.T) {
 
 		output := filepath.Join(t.TempDir(), "branch.json")
 		result := runCLI(t, isolatedEnvironment(t), nil,
-			"-C", subdir, "--base", "main", "--provider", "mock", "--out", output)
+			"-C", subdir, "--base", "main", "--provider", "mock", "--format", "json", "--out", output)
 		if result.err != nil {
 			t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
 		}
@@ -170,7 +313,7 @@ func TestGitSources(t *testing.T) {
 		}
 		output := filepath.Join(t.TempDir(), "working-tree.json")
 		result := runCLI(t, isolatedEnvironment(t), nil,
-			"-C", repo, "--base", "main", "--provider", "mock", "--out", output)
+			"-C", repo, "--base", "main", "--provider", "mock", "--format", "json", "--out", output)
 		if result.err != nil {
 			t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
 		}
@@ -222,7 +365,7 @@ func TestRepoConfigTrust(t *testing.T) {
 	}
 	env := isolatedEnvironment(t)
 	output := filepath.Join(t.TempDir(), "trusted.json")
-	args := []string{"-C", repo, "--diff", fixturePath(t), "--out", output}
+	args := []string{"-C", repo, "--diff", fixturePath(t), "--format", "json", "--out", output}
 
 	first := runCLI(t, env, nil, args...)
 	assertFailureContains(t, first, "--trust-repo-config")
@@ -246,14 +389,14 @@ func TestClaudeProvider(t *testing.T) {
 	if _, err := exec.LookPath("claude"); err != nil {
 		t.Skip("claude executable is not available")
 	}
-	output := filepath.Join(t.TempDir(), "claude.json")
+	output := filepath.Join(t.TempDir(), "claude.html")
 	ctxEnv := setEnv(os.Environ(), "XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
 	result := runCLIWithTimeout(t, 5*time.Minute, ctxEnv, nil,
 		"--diff", fixturePath(t), "--provider", "claude-cli", "--no-cache", "--out", output)
 	if result.err != nil {
 		t.Fatalf("claude command failed: %v\n%s", result.err, result.stderr)
 	}
-	readAndValidate(t, output)
+	readHTMLDocument(t, output)
 }
 
 type commandResult struct {
@@ -295,6 +438,44 @@ func readAndValidate(t *testing.T, path string) document.Document {
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatal(err)
 	}
+	validateDocument(t, result)
+	return result
+}
+
+func readHTMLDocument(t *testing.T, path string) (string, document.Document) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(data)
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(html)), "<!doctype html>") ||
+		!strings.Contains(html, "<html") || !strings.Contains(html, "</html>") {
+		t.Fatal("output is not a complete HTML document")
+	}
+	startMarker := `<script id="walkthrough-data" type="application/json">`
+	start := strings.Index(html, startMarker)
+	if start < 0 {
+		t.Fatal("JSON island missing")
+	}
+	start += len(startMarker)
+	end := strings.Index(html[start:], "</script>")
+	if end < 0 {
+		t.Fatal("JSON island closing tag missing")
+	}
+	var doc document.Document
+	if err := json.Unmarshal([]byte(html[start:start+end]), &doc); err != nil {
+		t.Fatalf("invalid JSON island: %v", err)
+	}
+	validateDocument(t, doc)
+	return html, doc
+}
+
+func validateDocument(t *testing.T, result document.Document) {
+	t.Helper()
+	if result.SchemaVersion != document.SchemaVersion {
+		t.Fatalf("schema version = %d, want %d", result.SchemaVersion, document.SchemaVersion)
+	}
 	if len(result.Files) == 0 || len(result.Analysis.Cohorts) == 0 {
 		t.Fatalf("document is incomplete: %#v", result)
 	}
@@ -323,12 +504,43 @@ func readAndValidate(t *testing.T, path string) document.Document {
 			t.Fatalf("file %d appears %d times", index, count)
 		}
 	}
-	return result
+}
+
+func assertSelfContained(t *testing.T, html string) {
+	t.Helper()
+	attributePattern := regexp.MustCompile(`(?i)(?:src|href)\s*=\s*["']([^"']+)["']`)
+	for _, match := range attributePattern.FindAllStringSubmatch(html, -1) {
+		if match[1] != "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" {
+			t.Fatalf("unexpected external reference: %s", match[1])
+		}
+	}
+	urlPattern := regexp.MustCompile(`(?i)url\(([^)]+)\)`)
+	if matches := urlPattern.FindAllStringSubmatch(html, -1); len(matches) > 0 {
+		t.Fatalf("unexpected CSS url references: %#v", matches)
+	}
 }
 
 func fixturePath(t *testing.T) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("testdata", "simple.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func viewerFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "viewer.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func hostileFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "hostile.patch"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,6 +574,16 @@ func removeEnv(env []string, names ...string) []string {
 func setEnv(env []string, key, value string) []string {
 	env = removeEnv(env, key)
 	return append(env, key+"="+value)
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
 
 func initializeRepo(t *testing.T) string {

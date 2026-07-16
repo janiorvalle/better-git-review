@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[MOCK] Guided review · better-git-review</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --canvas: #ffffff;
+  --canvas-subtle: #f6f8fa;
+  --canvas-inset: #f6f8fa;
+  --text: #1f2328;
+  --muted: #59636e;
+  --border: #d1d9e0;
+  --border-muted: #d8dee4;
+  --accent: #0969da;
+  --accent-soft: #ddf4ff;
+  --add-bg: #e6ffec;
+  --add-num: #ccffd8;
+  --add-word: #abf2bc;
+  --del-bg: #ffebe9;
+  --del-num: #ffd7d5;
+  --del-word: #ffcecb;
+  --hunk-bg: #ddf4ff;
+  --shadow: 0 1px 0 rgba(31,35,40,.04);
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0d1117;
+    --canvas-subtle: #161b22;
+    --canvas-inset: #010409;
+    --text: #f0f6fc;
+    --muted: #9198a1;
+    --border: #3d444d;
+    --border-muted: #21262d;
+    --accent: #4493f8;
+    --accent-soft: rgba(56,139,253,.15);
+    --add-bg: rgba(46,160,67,.15);
+    --add-num: rgba(46,160,67,.25);
+    --add-word: rgba(46,160,67,.4);
+    --del-bg: rgba(248,81,73,.1);
+    --del-num: rgba(248,81,73,.2);
+    --del-word: rgba(248,81,73,.4);
+    --hunk-bg: rgba(56,139,253,.15);
+    --shadow: 0 1px 0 rgba(255,255,255,.04);
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; background: var(--canvas); }
+body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.5 var(--ui); }
+button { font: inherit; }
+.app { display: grid; grid-template-columns: 272px minmax(0, 1fr); min-height: 100vh; }
+.sidebar { position: sticky; top: 0; height: 100vh; overflow: auto; border-right: 1px solid var(--border); background: var(--canvas-subtle); padding: 18px 12px; }
+.brand { padding: 0 10px 16px; border-bottom: 1px solid var(--border-muted); margin-bottom: 12px; }
+.brand-name { font-weight: 700; font-size: 13px; color: var(--muted); }
+.brand-title { margin: 4px 0; font-weight: 650; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.range { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
+.step-nav { display: grid; gap: 3px; }
+.step-nav-button { width: 100%; display: grid; grid-template-columns: 24px minmax(0,1fr) auto; gap: 8px; align-items: center; border: 1px solid transparent; background: transparent; color: var(--text); padding: 9px 8px; border-radius: 6px; text-align: left; cursor: pointer; }
+.step-nav-button:hover { background: var(--canvas); border-color: var(--border-muted); }
+.step-nav-button.active { background: var(--canvas); border-color: var(--border); box-shadow: var(--shadow); }
+.step-number { color: var(--muted); font: 11px var(--mono); }
+.step-label { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-count { color: var(--muted); font: 11px var(--mono); }
+.main { min-width: 0; background: var(--canvas); }
+.toolbar { position: sticky; top: 0; z-index: 20; min-height: 52px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 8px 24px; border-bottom: 1px solid var(--border); background: var(--canvas); }
+.step-counter { color: var(--muted); font-size: 12px; }
+.view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--canvas-subtle); }
+.view-toggle button { border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--muted); padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.view-toggle button:last-child { border-right: 0; }
+.view-toggle button.active { background: var(--canvas); color: var(--text); font-weight: 600; }
+.content { width: min(100%, 1480px); padding: 28px 32px 72px; }
+.step { display: none; }
+.step.active { display: block; }
+.eyebrow { color: var(--muted); font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+h1, h2 { letter-spacing: 0; }
+.step-title { font-size: 24px; line-height: 1.25; margin: 0; }
+.intent { color: var(--muted); font-size: 15px; margin: 6px 0 20px; max-width: 920px; }
+.overview-text, .narrative { max-width: 920px; font-size: 15px; margin: 18px 0; white-space: pre-wrap; }
+.overview-stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 24px; }
+.stat-pill, .layer-badge, .status-tag, .dependency-chip { display: inline-flex; align-items: center; min-height: 22px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; }
+.stat-pill { background: var(--canvas-subtle); }
+.plus { color: #1a7f37; } .minus { color: #cf222e; }
+@media (prefers-color-scheme: dark) { .plus { color: #3fb950; } .minus { color: #f85149; } }
+.layer-badge { text-transform: uppercase; letter-spacing: .04em; }
+.layer-schema { background:#fff8c5; color:#633c01; } .layer-backend { background:#ddf4ff; color:#0550ae; }
+.layer-api { background:#fbefff; color:#8250df; } .layer-ui { background:#ffeff7; color:#bf3989; }
+.layer-tests { background:#dafbe1; color:#116329; } .layer-config { background:#fff1e5; color:#953800; }
+.layer-docs { background:#eaeef2; color:#424a53; } .layer-other { background:#eaeef2; color:#424a53; }
+@media (prefers-color-scheme: dark) {
+  .layer-schema { background:#3b2e00; color:#eac54f; } .layer-backend { background:#0c2d4a; color:#79c0ff; }
+  .layer-api { background:#2f2140; color:#d2a8ff; } .layer-ui { background:#3d1830; color:#ff9bce; }
+  .layer-tests { background:#12351f; color:#56d364; } .layer-config { background:#3d240c; color:#ffa657; }
+  .layer-docs,.layer-other { background:#262c36; color:#b1bac4; }
+}
+.toc { display: grid; border-top: 1px solid var(--border); max-width: 920px; margin-top: 24px; }
+.toc-button { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; gap: 10px; align-items: center; width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); padding: 12px 4px; text-align: left; cursor: pointer; }
+.toc-button:hover .toc-title { color: var(--accent); }
+.toc-title { font-weight: 650; }
+.toc-intent { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; }
+.diagram { max-width: 920px; border: 1px solid var(--border); background: var(--canvas-subtle); padding: 16px; border-radius: 6px; overflow: auto; }
+.diagram pre { margin: 0; text-align: left; font: 12px/1.5 var(--mono); }
+.dependencies { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 18px; }
+.dependencies-label { color: var(--muted); font-size: 12px; }
+.dependency-chip { background: var(--canvas-subtle); color: var(--text); cursor: pointer; }
+.dependency-chip:hover { border-color: var(--accent); color: var(--accent); }
+.review-notes { max-width: 920px; border-left: 3px solid #bf8700; padding: 8px 0 8px 14px; margin: 18px 0 22px; }
+.review-notes h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; color: var(--muted); }
+.review-notes ul { margin: 0; padding-left: 18px; }
+.file { border: 1px solid var(--border); border-radius: 6px; margin: 0 0 20px; overflow: clip; background: var(--canvas); }
+.file-header { position: sticky; top: 52px; z-index: 10; display: grid; grid-template-columns: 28px minmax(0,1fr) auto auto; gap: 8px; align-items: center; border-bottom: 1px solid var(--border); background: var(--canvas-subtle); min-height: 44px; padding: 7px 10px; }
+.file-toggle { width: 26px; height: 26px; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 4px; }
+.file-toggle:hover { background: var(--canvas); color: var(--text); }
+.file.collapsed .file-toggle { transform: rotate(-90deg); }
+.file-path { min-width: 0; font: 600 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+.status-tag { border-radius: 4px; color: var(--muted); text-transform: capitalize; background: var(--canvas); }
+.file-stat { font: 11px var(--mono); white-space: nowrap; }
+.file-summary { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+.file.collapsed .file-body, .file.collapsed .file-summary { display: none; }
+.binary { padding: 24px; color: var(--muted); text-align: center; font-family: var(--mono); }
+.diff-scroll { overflow-x: auto; }
+.diff-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 12px/20px var(--mono); }
+.diff-table td { padding: 0; vertical-align: top; }
+.number-column { width: 48px; }
+.prefix-column { width: 24px; }
+.split-number-column { width: 46px; }
+.split-code-column { width: calc(50% - 46px); }
+.line-number { width: 48px; padding: 0 8px !important; text-align: right; color: var(--muted); background: var(--canvas-subtle); border-right: 1px solid var(--border-muted); user-select: none; }
+.line-prefix { width: 24px; text-align: center; user-select: none; }
+.code { white-space: pre; padding: 0 12px !important; overflow: visible; }
+.line-a { background: var(--add-bg); } .line-a .line-number { background: var(--add-num); }
+.line-d { background: var(--del-bg); } .line-d .line-number { background: var(--del-num); }
+.line-a mark.word-change { background: var(--add-word); } .line-d mark.word-change { background: var(--del-word); }
+mark.word-change { color: inherit; border-radius: 2px; }
+.hunk-row td { background: var(--hunk-bg); color: var(--muted); padding: 4px 12px !important; }
+.blame-row td { border-top: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); background: var(--canvas-subtle); color: var(--muted); padding: 4px 12px !important; font: 11px/18px var(--ui); }
+.blame-author { color: var(--text); font-weight: 600; }
+.fold-row td { background: var(--canvas-subtle); border-block: 1px solid var(--border-muted); }
+.fold-button { width: 100%; border: 0; background: transparent; color: var(--muted); padding: 4px 12px; text-align: left; cursor: pointer; font: 11px/18px var(--ui); }
+.fold-button:hover { color: var(--accent); background: var(--accent-soft); }
+.fold-hidden { display: none; }
+.placeholder { background-color: var(--canvas-inset); background-image: repeating-linear-gradient(135deg, transparent, transparent 5px, color-mix(in srgb, var(--border) 34%, transparent) 5px, color-mix(in srgb, var(--border) 34%, transparent) 7px); }
+.split-table .line-number { width: 46px; }
+.split-code { width: calc(50% - 46px); overflow: hidden; }
+.view-split { display: none; }
+body[data-view="split"] .view-unified { display: none; }
+body[data-view="split"] .view-split { display: block; }
+.pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border); }
+.pager-button { min-height: 46px; border: 1px solid var(--border); border-radius: 6px; background: var(--canvas); color: var(--text); padding: 7px 12px; cursor: pointer; text-align: left; }
+.pager-button.next { text-align: right; }
+.pager-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pager-button:disabled { opacity: .35; cursor: default; }
+.pager-direction { display: block; color: var(--muted); font-size: 11px; }
+.pager-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.bg { background-color: #f7f7f7; }
+.chroma { background-color: #f7f7f7; -webkit-text-size-adjust: none; }
+.chroma .err { color: #f6f8fa; background-color: #82071e }
+.chroma .lnlinks { outline: none; text-decoration: none; color: inherit }
+.chroma .lntd { vertical-align: top; padding: 0; margin: 0; border: 0; }
+.chroma .lntable { border-spacing: 0; padding: 0; margin: 0; border: 0; }
+.chroma .hl { background-color: #dedede }
+.chroma .lnt { white-space: pre; -webkit-user-select: none; user-select: none; margin-right: 0.4em; padding: 0 0.4em 0 0.4em;color: #7f7f7f }
+.chroma .ln { white-space: pre; -webkit-user-select: none; user-select: none; margin-right: 0.4em; padding: 0 0.4em 0 0.4em;color: #7f7f7f }
+.chroma .line { display: flex; }
+.chroma .k { color: #cf222e }
+.chroma .kc { color: #cf222e }
+.chroma .kd { color: #cf222e }
+.chroma .kn { color: #cf222e }
+.chroma .kp { color: #cf222e }
+.chroma .kr { color: #cf222e }
+.chroma .kt { color: #cf222e }
+.chroma .na { color: #1f2328 }
+.chroma .nc { color: #1f2328 }
+.chroma .no { color: #0550ae }
+.chroma .nd { color: #0550ae }
+.chroma .ni { color: #6639ba }
+.chroma .nl { color: #990000; font-weight: bold }
+.chroma .nn { color: #24292e }
+.chroma .nx { color: #1f2328 }
+.chroma .nt { color: #0550ae }
+.chroma .nb { color: #6639ba }
+.chroma .bp { color: #6a737d }
+.chroma .nv { color: #953800 }
+.chroma .vc { color: #953800 }
+.chroma .vg { color: #953800 }
+.chroma .vi { color: #953800 }
+.chroma .vm { color: #953800 }
+.chroma .nf { color: #6639ba }
+.chroma .fm { color: #6639ba }
+.chroma .s { color: #0a3069 }
+.chroma .sa { color: #0a3069 }
+.chroma .sb { color: #0a3069 }
+.chroma .sc { color: #0a3069 }
+.chroma .dl { color: #0a3069 }
+.chroma .sd { color: #0a3069 }
+.chroma .s2 { color: #0a3069 }
+.chroma .se { color: #0a3069 }
+.chroma .sh { color: #0a3069 }
+.chroma .si { color: #0a3069 }
+.chroma .sx { color: #0a3069 }
+.chroma .sr { color: #0a3069 }
+.chroma .s1 { color: #0a3069 }
+.chroma .ss { color: #032f62 }
+.chroma .m { color: #0550ae }
+.chroma .mb { color: #0550ae }
+.chroma .mf { color: #0550ae }
+.chroma .mh { color: #0550ae }
+.chroma .mi { color: #0550ae }
+.chroma .il { color: #0550ae }
+.chroma .mo { color: #0550ae }
+.chroma .o { color: #0550ae }
+.chroma .ow { color: #0550ae }
+.chroma .or { color: #0550ae }
+.chroma .p { color: #1f2328 }
+.chroma .c { color: #57606a }
+.chroma .ch { color: #57606a }
+.chroma .cm { color: #57606a }
+.chroma .c1 { color: #57606a }
+.chroma .cs { color: #57606a }
+.chroma .cp { color: #57606a }
+.chroma .cpf { color: #57606a }
+.chroma .gd { color: #82071e; background-color: #ffebe9 }
+.chroma .ge { color: #1f2328 }
+.chroma .gi { color: #116329; background-color: #dafbe1 }
+.chroma .go { color: #1f2328 }
+.chroma .gl { text-decoration: underline }
+.chroma .w { color: #ffffff }
+
+@media (prefers-color-scheme: dark) { .bg { color: #e6edf3; background-color: #0d1117; }
+.chroma { color: #e6edf3; background-color: #0d1117; -webkit-text-size-adjust: none; }
+.chroma .err { color: #f85149 }
+.chroma .lnlinks { outline: none; text-decoration: none; color: inherit }
+.chroma .lntd { vertical-align: top; padding: 0; margin: 0; border: 0; }
+.chroma .lntable { border-spacing: 0; padding: 0; margin: 0; border: 0; }
+.chroma .hl { background-color: #6e7681 }
+.chroma .lnt { white-space: pre; -webkit-user-select: none; user-select: none; margin-right: 0.4em; padding: 0 0.4em 0 0.4em;color: #737679 }
+.chroma .ln { white-space: pre; -webkit-user-select: none; user-select: none; margin-right: 0.4em; padding: 0 0.4em 0 0.4em;color: #6e7681 }
+.chroma .line { display: flex; }
+.chroma .k { color: #ff7b72 }
+.chroma .kc { color: #79c0ff }
+.chroma .kd { color: #ff7b72 }
+.chroma .kn { color: #ff7b72 }
+.chroma .kp { color: #79c0ff }
+.chroma .kr { color: #ff7b72 }
+.chroma .kt { color: #ff7b72 }
+.chroma .nc { color: #f0883e; font-weight: bold }
+.chroma .no { color: #79c0ff; font-weight: bold }
+.chroma .nd { color: #d2a8ff; font-weight: bold }
+.chroma .ni { color: #ffa657 }
+.chroma .ne { color: #f0883e; font-weight: bold }
+.chroma .nl { color: #79c0ff; font-weight: bold }
+.chroma .nn { color: #ff7b72 }
+.chroma .py { color: #79c0ff }
+.chroma .nt { color: #7ee787 }
+.chroma .nv { color: #79c0ff }
+.chroma .vc { color: #79c0ff }
+.chroma .vg { color: #79c0ff }
+.chroma .vi { color: #79c0ff }
+.chroma .vm { color: #79c0ff }
+.chroma .nf { color: #d2a8ff; font-weight: bold }
+.chroma .fm { color: #d2a8ff; font-weight: bold }
+.chroma .l { color: #a5d6ff }
+.chroma .ld { color: #79c0ff }
+.chroma .s { color: #a5d6ff }
+.chroma .sa { color: #79c0ff }
+.chroma .sb { color: #a5d6ff }
+.chroma .sc { color: #a5d6ff }
+.chroma .dl { color: #79c0ff }
+.chroma .sd { color: #a5d6ff }
+.chroma .s2 { color: #a5d6ff }
+.chroma .se { color: #79c0ff }
+.chroma .sh { color: #79c0ff }
+.chroma .si { color: #a5d6ff }
+.chroma .sx { color: #a5d6ff }
+.chroma .sr { color: #79c0ff }
+.chroma .s1 { color: #a5d6ff }
+.chroma .ss { color: #a5d6ff }
+.chroma .m { color: #a5d6ff }
+.chroma .mb { color: #a5d6ff }
+.chroma .mf { color: #a5d6ff }
+.chroma .mh { color: #a5d6ff }
+.chroma .mi { color: #a5d6ff }
+.chroma .il { color: #a5d6ff }
+.chroma .mo { color: #a5d6ff }
+.chroma .o { color: #ff7b72; font-weight: bold }
+.chroma .ow { color: #ff7b72; font-weight: bold }
+.chroma .or { color: #ff7b72; font-weight: bold }
+.chroma .c { color: #8b949e; font-style: italic }
+.chroma .ch { color: #8b949e; font-style: italic }
+.chroma .cm { color: #8b949e; font-style: italic }
+.chroma .c1 { color: #8b949e; font-style: italic }
+.chroma .cs { color: #8b949e; font-weight: bold; font-style: italic }
+.chroma .cp { color: #8b949e; font-weight: bold; font-style: italic }
+.chroma .cpf { color: #8b949e; font-weight: bold; font-style: italic }
+.chroma .gd { color: #ffa198; background-color: #490202 }
+.chroma .ge { font-style: italic }
+.chroma .gr { color: #ffa198 }
+.chroma .gh { color: #79c0ff; font-weight: bold }
+.chroma .gi { color: #56d364; background-color: #0f5323 }
+.chroma .go { color: #8b949e }
+.chroma .gp { color: #8b949e }
+.chroma .gs { font-weight: bold }
+.chroma .gu { color: #79c0ff }
+.chroma .gt { color: #ff7b72 }
+.chroma .gl { text-decoration: underline }
+.chroma .w { color: #6e7681 }
+ }
+@media (max-width: 820px) {
+  .app { display: block; }
+  .sidebar { position: sticky; height: auto; max-height: 170px; z-index: 30; border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
+  .brand { display: none; }
+  .step-nav { display: flex; overflow-x: auto; gap: 6px; }
+  .step-nav-button { flex: 0 0 auto; width: auto; grid-template-columns: 20px auto auto; }
+  .step-label { max-width: 180px; }
+  .toolbar { top: 61px; padding-inline: 14px; }
+  .content { padding: 20px 12px 56px; }
+  .file-header { top: 113px; grid-template-columns: 28px minmax(0,1fr) auto; }
+  .status-tag { display: none; }
+  .split-table { min-width: 900px; }
+  .pager { grid-template-columns: 1fr 1fr; }
+  .pager-count { grid-column: 1 / -1; grid-row: 1; text-align: center; }
+}
+</style>
+</head>
+<body data-view="unified">
+<div class="app">
+  <aside class="sidebar" aria-label="Walkthrough steps">
+    <div class="brand">
+      <div class="brand-name">better-git-review</div>
+      <div class="brand-title">[MOCK] Guided review</div>
+      <div class="range">artifacts/gate-m2-go-mod.patch</div>
+    </div>
+    <nav class="step-nav">
+      
+      <button class="step-nav-button active" type="button" data-step-target="0">
+        <span class="step-number">◆</span>
+        <span class="step-label">Overview</span>
+        <span class="file-count">1</span>
+      </button>
+      
+      <button class="step-nav-button" type="button" data-step-target="1">
+        <span class="step-number">1</span>
+        <span class="step-label">Backend changes</span>
+        <span class="file-count">1</span>
+      </button>
+      
+    </nav>
+  </aside>
+  <div class="main">
+    <header class="toolbar">
+      <div class="step-counter" id="step-counter">Overview</div>
+      <div class="view-toggle" role="group" aria-label="Diff view">
+        <button type="button" data-view-target="unified" class="active">Unified</button>
+        <button type="button" data-view-target="split">Split</button>
+      </div>
+    </header>
+    <main class="content">
+      
+      <section class="step active" id="step-overview" data-step="0" data-step-title="Overview">
+        
+          <div class="eyebrow">Guided walkthrough</div>
+          <h1 class="step-title">[MOCK] Guided review</h1>
+          <div class="overview-stats">
+            <span class="stat-pill">1 files</span>
+            <span class="stat-pill plus">+6</span>
+            <span class="stat-pill minus">−1</span>
+          </div>
+          <div class="overview-text">Mock analysis: files were grouped by path heuristics only.</div>
+          <div class="diagram"><pre class="mermaid">graph LR
+  A[Mock mode] --&gt; B[No LLM analysis]</pre></div>
+          <div class="toc">
+            
+            <button type="button" class="toc-button" data-step-target="1">
+              <span class="step-number">1</span>
+              <span><span class="toc-title">Backend changes</span><span class="toc-intent">[mock] Files grouped heuristically as backend.</span></span>
+              <span class="layer-badge layer-backend">backend</span>
+            </button>
+            
+          </div>
+        
+        <div class="pager">
+          <button type="button" class="pager-button prev"><span class="pager-direction">← Previous</span><span class="pager-label"></span></button>
+          <span class="pager-count"></span>
+          <button type="button" class="pager-button next"><span class="pager-direction">Next →</span><span class="pager-label"></span></button>
+        </div>
+      </section>
+      
+      <section class="step" id="step-1" data-step="1" data-step-title="Backend changes">
+        
+          <div class="eyebrow">Step 1 <span class="layer-badge layer-backend">backend</span></div>
+          <h2 class="step-title">Backend changes</h2>
+          <p class="intent">[mock] Files grouped heuristically as backend.</p>
+          
+          <div class="narrative">[mock mode] This grouping was produced by path heuristics, not an LLM.</div>
+          
+          
+          <article class="file" data-file="0">
+            <header class="file-header">
+              <button type="button" class="file-toggle" aria-label="Toggle go.mod" aria-expanded="true">▼</button>
+              <div class="file-path">go.mod</div>
+              <span class="status-tag">modified</span>
+              <span class="file-stat"><span class="plus">+6</span> <span class="minus">−1</span></span>
+            </header>
+            <div class="file-summary">[mock] modified, &#43;6/-1</div>
+            <div class="file-body">
+              
+              <div class="view-unified diff-scroll">
+                <table class="diff-table" aria-label="Unified diff for go.mod">
+                <colgroup><col class="number-column"><col class="number-column"><col class="prefix-column"><col></colgroup>
+                <tbody>
+                
+                  
+                  <tr class="hunk-row"><td colspan="4">@@ module github.com/janiorvalle/better-git-review</td></tr>
+                  
+                
+                  
+                  <tr class="line-c"><td class="line-number">2</td><td class="line-number">2</td><td class="line-prefix"> </td><td class="code chroma"></td></tr>
+                
+                  
+                  <tr class="line-c"><td class="line-number">3</td><td class="line-number">3</td><td class="line-prefix"> </td><td class="code chroma"><span class="n">go</span> <span class="mf">1.24</span></td></tr>
+                
+                  
+                  <tr class="line-c"><td class="line-number">4</td><td class="line-number">4</td><td class="line-prefix"> </td><td class="code chroma"></td></tr>
+                
+                  
+                  <tr class="line-d"><td class="line-number">5</td><td class="line-number"></td><td class="line-prefix">-</td><td class="code chroma"><span class="n">require</span> <mark class="word-change"><span class="n">github.com</span><span class="o">/</span><span class="n">BurntSushi</span><span class="o">/</span><span class="n">toml</span> <span class="n">v1.5.0</span></mark></td></tr>
+                
+                  
+                  <tr class="line-a"><td class="line-number"></td><td class="line-number">5</td><td class="line-prefix">&#43;</td><td class="code chroma"><span class="n">require</span> <mark class="word-change"><span class="p">(</span></mark></td></tr>
+                
+                  
+                  <tr class="line-a"><td class="line-number"></td><td class="line-number">6</td><td class="line-prefix">&#43;</td><td class="code chroma">	<span class="n">github.com</span><span class="o">/</span><span class="n">BurntSushi</span><span class="o">/</span><span class="n">toml</span> <span class="n">v1.5.0</span></td></tr>
+                
+                  
+                  <tr class="line-a"><td class="line-number"></td><td class="line-number">7</td><td class="line-prefix">&#43;</td><td class="code chroma">	<span class="n">github.com</span><span class="o">/</span><span class="n">alecthomas</span><span class="o">/</span><span class="n">chroma</span><span class="o">/</span><span class="n">v2</span> <span class="n">v2.24.1</span></td></tr>
+                
+                  
+                  <tr class="line-a"><td class="line-number"></td><td class="line-number">8</td><td class="line-prefix">&#43;</td><td class="code chroma"><span class="p">)</span></td></tr>
+                
+                  
+                  <tr class="line-a"><td class="line-number"></td><td class="line-number">9</td><td class="line-prefix">&#43;</td><td class="code chroma"></td></tr>
+                
+                  
+                  <tr class="line-a"><td class="line-number"></td><td class="line-number">10</td><td class="line-prefix">&#43;</td><td class="code chroma"><span class="n">require</span> <span class="n">github.com</span><span class="o">/</span><span class="n">dlclark</span><span class="o">/</span><span class="n">regexp2</span> <span class="n">v1.12.0</span> <span class="o">//</span> <span class="n">indirect</span></td></tr>
+                
+                </tbody></table>
+              </div>
+              <div class="view-split diff-scroll">
+                <table class="diff-table split-table" aria-label="Split diff for go.mod">
+                <colgroup><col class="split-number-column"><col class="split-code-column"><col class="split-number-column"><col class="split-code-column"></colgroup>
+                <tbody>
+                
+                  
+                  <tr class="hunk-row"><td colspan="4">@@ module github.com/janiorvalle/better-git-review</td></tr>
+                  
+                
+                  
+                  <tr>
+                    <td class="line-number line-c">2</td>
+                    <td class="code chroma split-code line-c"></td>
+                    <td class="line-number line-c">2</td>
+                    <td class="code chroma split-code line-c"></td>
+                  </tr>
+                
+                  
+                  <tr>
+                    <td class="line-number line-c">3</td>
+                    <td class="code chroma split-code line-c"><span class="n">go</span> <span class="mf">1.24</span></td>
+                    <td class="line-number line-c">3</td>
+                    <td class="code chroma split-code line-c"><span class="n">go</span> <span class="mf">1.24</span></td>
+                  </tr>
+                
+                  
+                  <tr>
+                    <td class="line-number line-c">4</td>
+                    <td class="code chroma split-code line-c"></td>
+                    <td class="line-number line-c">4</td>
+                    <td class="code chroma split-code line-c"></td>
+                  </tr>
+                
+                  
+                  <tr>
+                    <td class="line-number line-d">5</td>
+                    <td class="code chroma split-code line-d"><span class="n">require</span> <mark class="word-change"><span class="n">github.com</span><span class="o">/</span><span class="n">BurntSushi</span><span class="o">/</span><span class="n">toml</span> <span class="n">v1.5.0</span></mark></td>
+                    <td class="line-number line-a">5</td>
+                    <td class="code chroma split-code line-a"><span class="n">require</span> <mark class="word-change"><span class="p">(</span></mark></td>
+                  </tr>
+                
+                  
+                  <tr>
+                    <td class="line-number line-"></td>
+                    <td class="code chroma split-code line- placeholder"></td>
+                    <td class="line-number line-a">6</td>
+                    <td class="code chroma split-code line-a">	<span class="n">github.com</span><span class="o">/</span><span class="n">BurntSushi</span><span class="o">/</span><span class="n">toml</span> <span class="n">v1.5.0</span></td>
+                  </tr>
+                
+                  
+                  <tr>
+                    <td class="line-number line-"></td>
+                    <td class="code chroma split-code line- placeholder"></td>
+                    <td class="line-number line-a">7</td>
+                    <td class="code chroma split-code line-a">	<span class="n">github.com</span><span class="o">/</span><span class="n">alecthomas</span><span class="o">/</span><span class="n">chroma</span><span class="o">/</span><span class="n">v2</span> <span class="n">v2.24.1</span></td>
+                  </tr>
+                
+                  
+                  <tr>
+                    <td class="line-number line-"></td>
+                    <td class="code chroma split-code line- placeholder"></td>
+                    <td class="line-number line-a">8</td>
+                    <td class="code chroma split-code line-a"><span class="p">)</span></td>
+                  </tr>
+                
+                  
+                  <tr>
+                    <td class="line-number line-"></td>
+                    <td class="code chroma split-code line- placeholder"></td>
+                    <td class="line-number line-a">9</td>
+                    <td class="code chroma split-code line-a"></td>
+                  </tr>
+                
+                  
+                  <tr>
+                    <td class="line-number line-"></td>
+                    <td class="code chroma split-code line- placeholder"></td>
+                    <td class="line-number line-a">10</td>
+                    <td class="code chroma split-code line-a"><span class="n">require</span> <span class="n">github.com</span><span class="o">/</span><span class="n">dlclark</span><span class="o">/</span><span class="n">regexp2</span> <span class="n">v1.12.0</span> <span class="o">//</span> <span class="n">indirect</span></td>
+                  </tr>
+                
+                </tbody></table>
+              </div>
+              
+            </div>
+          </article>
+          
+        
+        <div class="pager">
+          <button type="button" class="pager-button prev"><span class="pager-direction">← Previous</span><span class="pager-label"></span></button>
+          <span class="pager-count"></span>
+          <button type="button" class="pager-button next"><span class="pager-direction">Next →</span><span class="pager-label"></span></button>
+        </div>
+      </section>
+      
+    </main>
+  </div>
+</div>
+<script id="walkthrough-data" type="application/json">{"schemaVersion":2,"source":{"title":"gate-m2-go-mod.patch","description":"","range":"artifacts/gate-m2-go-mod.patch","url":null,"name":"gate-m2-go-mod","repoDir":""},"files":[{"path":"go.mod","oldPath":"go.mod","newPath":"go.mod","status":"modified","binary":false,"additions":6,"deletions":1,"hunks":[{"header":"module github.com/janiorvalle/better-git-review","lines":[{"t":"c","old":2,"new":2,"text":""},{"t":"c","old":3,"new":3,"text":"go 1.24"},{"t":"c","old":4,"new":4,"text":""},{"t":"d","old":5,"new":0,"text":"require github.com/BurntSushi/toml v1.5.0"},{"t":"a","old":0,"new":5,"text":"require ("},{"t":"a","old":0,"new":6,"text":"\tgithub.com/BurntSushi/toml v1.5.0"},{"t":"a","old":0,"new":7,"text":"\tgithub.com/alecthomas/chroma/v2 v2.24.1"},{"t":"a","old":0,"new":8,"text":")"},{"t":"a","old":0,"new":9,"text":""},{"t":"a","old":0,"new":10,"text":"require github.com/dlclark/regexp2 v1.12.0 // indirect"}]}]}],"analysis":{"title":"[MOCK] Guided review","overview":"Mock analysis: files were grouped by path heuristics only.","mermaid":"graph LR\n  A[Mock mode] --\u003e B[No LLM analysis]","cohorts":[{"title":"Backend changes","layer":"backend","intent":"[mock] Files grouped heuristically as backend.","narrative":"[mock mode] This grouping was produced by path heuristics, not an LLM.","files":[0],"fileSummaries":["[mock] modified, +6/-1"],"reviewNotes":[],"dependsOn":[]}]},"meta":{"provider":"mock","model":"deterministic","generator":"better-git-review v0.2.0","cached":false}}</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var steps = Array.from(document.querySelectorAll(".step"));
+  var navButtons = Array.from(document.querySelectorAll(".step-nav-button"));
+  var current = 0;
+  var storedView = "unified";
+  try { storedView = localStorage.getItem("better-git-review-view") || "unified"; } catch (_) {}
+
+  function stepTitle(index) {
+    return steps[index] ? steps[index].dataset.stepTitle : "";
+  }
+  function updatePager(section) {
+    var prev = section.querySelector(".pager-button.prev");
+    var next = section.querySelector(".pager-button.next");
+    var count = section.querySelector(".pager-count");
+    prev.disabled = current === 0;
+    next.disabled = current === steps.length - 1;
+    prev.dataset.stepTarget = String(current - 1);
+    next.dataset.stepTarget = String(current + 1);
+    prev.querySelector(".pager-label").textContent = stepTitle(current - 1);
+    next.querySelector(".pager-label").textContent = stepTitle(current + 1);
+    count.textContent = "Step " + (current + 1) + " of " + steps.length;
+  }
+  function go(index) {
+    if (index < 0 || index >= steps.length) return;
+    current = index;
+    steps.forEach(function (step, i) { step.classList.toggle("active", i === current); });
+    navButtons.forEach(function (button, i) { button.classList.toggle("active", i === current); });
+    document.getElementById("step-counter").textContent = stepTitle(current);
+    updatePager(steps[current]);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+  function setView(view) {
+    if (view !== "split") view = "unified";
+    document.body.dataset.view = view;
+    document.querySelectorAll("[data-view-target]").forEach(function (button) {
+      button.classList.toggle("active", button.dataset.viewTarget === view);
+    });
+    try { localStorage.setItem("better-git-review-view", view); } catch (_) {}
+  }
+
+  document.addEventListener("click", function (event) {
+    var stepButton = event.target.closest("[data-step-target]");
+    if (stepButton) {
+      go(Number(stepButton.dataset.stepTarget));
+      return;
+    }
+    var viewButton = event.target.closest("[data-view-target]");
+    if (viewButton) {
+      setView(viewButton.dataset.viewTarget);
+      return;
+    }
+    var fileButton = event.target.closest(".file-toggle");
+    if (fileButton) {
+      var file = fileButton.closest(".file");
+      file.classList.toggle("collapsed");
+      fileButton.setAttribute("aria-expanded", String(!file.classList.contains("collapsed")));
+      return;
+    }
+    var foldButton = event.target.closest("[data-fold-target]");
+    if (foldButton) {
+      var id = foldButton.dataset.foldTarget;
+      document.querySelectorAll("[data-fold-group=\"" + CSS.escape(id) + "\"]").forEach(function (row) {
+        row.classList.remove("fold-hidden");
+      });
+      document.querySelectorAll("[data-fold-control=\"" + CSS.escape(id) + "\"]").forEach(function (row) {
+        row.remove();
+      });
+    }
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.target.matches("input, textarea, select")) return;
+    if (event.key === "ArrowRight") go(current + 1);
+    if (event.key === "ArrowLeft") go(current - 1);
+  });
+
+  setView(storedView);
+  go(0);
+  if (window.mermaid) {
+    try {
+      window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "neutral" });
+      window.mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+    } catch (_) {}
+  }
+});
+</script>
+</body>
+</html>
