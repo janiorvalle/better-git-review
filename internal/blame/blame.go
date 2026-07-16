@@ -79,32 +79,38 @@ func enrich(
 
 func ParsePorcelain(output []byte) (*document.Blame, error) {
 	var (
-		author    string
-		authorTZ  string
-		authorTS  int64
-		best      *document.Blame
-		bestStamp int64
+		author      string
+		authorTZ    string
+		authorTS    int64
+		committerTZ string
+		committerTS int64
+		best        *document.Blame
+		bestStamp   int64
 	)
 	flush := func() {
-		if author == "" || authorTS == 0 || authorTS < bestStamp {
+		stamp, timezone := committerTS, committerTZ
+		if stamp == 0 {
+			stamp, timezone = authorTS, authorTZ
+		}
+		if author == "" || stamp == 0 || stamp < bestStamp {
 			return
 		}
 		location := time.UTC
-		if len(authorTZ) == 5 {
+		if len(timezone) == 5 {
 			sign := 1
-			if authorTZ[0] == '-' {
+			if timezone[0] == '-' {
 				sign = -1
 			}
-			hours, hourErr := strconv.Atoi(authorTZ[1:3])
-			minutes, minuteErr := strconv.Atoi(authorTZ[3:5])
+			hours, hourErr := strconv.Atoi(timezone[1:3])
+			minutes, minuteErr := strconv.Atoi(timezone[3:5])
 			if hourErr == nil && minuteErr == nil {
 				location = time.FixedZone("", sign*(hours*60+minutes)*60)
 			}
 		}
-		bestStamp = authorTS
+		bestStamp = stamp
 		best = &document.Blame{
 			Author: author,
-			Date:   time.Unix(authorTS, 0).In(location).Format(time.RFC3339),
+			Date:   time.Unix(stamp, 0).In(location).Format(time.RFC3339),
 		}
 	}
 
@@ -112,6 +118,7 @@ func ParsePorcelain(output []byte) (*document.Blame, error) {
 		if isCommitHeader(line) {
 			flush()
 			author, authorTZ, authorTS = "", "", 0
+			committerTZ, committerTS = "", 0
 			continue
 		}
 		switch {
@@ -121,6 +128,10 @@ func ParsePorcelain(output []byte) (*document.Blame, error) {
 			authorTS, _ = strconv.ParseInt(strings.TrimPrefix(line, "author-time "), 10, 64)
 		case strings.HasPrefix(line, "author-tz "):
 			authorTZ = strings.TrimPrefix(line, "author-tz ")
+		case strings.HasPrefix(line, "committer-time "):
+			committerTS, _ = strconv.ParseInt(strings.TrimPrefix(line, "committer-time "), 10, 64)
+		case strings.HasPrefix(line, "committer-tz "):
+			committerTZ = strings.TrimPrefix(line, "committer-tz ")
 		}
 	}
 	flush()

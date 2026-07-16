@@ -9,16 +9,20 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
-func TestParsePorcelainUsesMostRecentAuthor(t *testing.T) {
+func TestParsePorcelainUsesMostRecentCommit(t *testing.T) {
 	output := `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1
 author Older Author
-author-time 1704067200
+author-time 1735689600
 author-tz -0500
+committer-time 1704067200
+committer-tz -0500
 filename file.go
 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 2 2 1
 author Newer Author
-author-time 1735689600
+author-time 1704067200
 author-tz +0000
+committer-time 1735689600
+committer-tz +0000
 filename file.go
 `
 	got, err := ParsePorcelain([]byte(output))
@@ -46,6 +50,8 @@ func TestEnrichPassesHardenedGitArguments(t *testing.T) {
 author Reviewer
 author-time 1735689600
 author-tz +0000
+committer-time 1735689600
+committer-tz +0000
 filename file.go
 `)}
 	files := []document.File{{
@@ -72,6 +78,8 @@ func TestEnrichUncommittedUsesHeadSideCoordinates(t *testing.T) {
 author Reviewer
 author-time 1735689600
 author-tz +0000
+committer-time 1735689600
+committer-tz +0000
 filename file.go
 `)}
 	files := []document.File{{
