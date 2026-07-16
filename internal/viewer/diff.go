@@ -87,8 +87,9 @@ func BuildRows(file document.File, fileIndex int) ([]UnifiedRow, []SplitRow) {
 			unified = append(unified, UnifiedRow{Kind: "blame", Blame: hunk.Blame})
 			split = append(split, SplitRow{Kind: "blame", Blame: hunk.Blame})
 		}
-		unified = append(unified, UnifiedRow{Kind: "hunk", Header: hunk.Header})
-		split = append(split, SplitRow{Kind: "hunk", Header: hunk.Header})
+		header := hunkLabel(hunk)
+		unified = append(unified, UnifiedRow{Kind: "hunk", Header: header})
+		split = append(split, SplitRow{Kind: "hunk", Header: header})
 
 		pairs := pairChangedLines(hunk.Lines)
 		startUnified := len(unified)
@@ -262,6 +263,36 @@ func applyFolds[T any](
 
 func isSplitContext(row SplitRow) bool {
 	return row.Kind == "line" && row.Old.Class == "c" && row.New.Class == "c"
+}
+
+// hunkLabel returns the display text for a hunk separator row. Git headers
+// carry the enclosing declaration when available; when they don't, a bare
+// "@@" row looks unfinished, so synthesize a line-range label instead.
+func hunkLabel(hunk document.Hunk) string {
+	if hunk.Header != "" {
+		return hunk.Header
+	}
+	first, last := 0, 0
+	for _, line := range hunk.Lines {
+		number := line.New
+		if number == 0 {
+			number = line.Old
+		}
+		if number == 0 {
+			continue
+		}
+		if first == 0 {
+			first = number
+		}
+		last = number
+	}
+	if first == 0 {
+		return ""
+	}
+	if first == last {
+		return fmt.Sprintf("line %d", first)
+	}
+	return fmt.Sprintf("lines %d–%d", first, last)
 }
 
 func linePrefix(kind string) string {

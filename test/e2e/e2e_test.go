@@ -54,7 +54,7 @@ func TestHappyPath(t *testing.T) {
 	if doc.Meta.Cached {
 		t.Fatal("first run should not be cached")
 	}
-	if doc.Meta.Provider != "mock" || doc.SchemaVersion != 3 {
+	if doc.Meta.Provider != "mock" || doc.SchemaVersion != 4 {
 		t.Fatalf("unexpected metadata: %#v", doc.Meta)
 	}
 	if doc.Meta.Staged {
@@ -74,7 +74,7 @@ func TestHTMLHappyPathAndSelfContainment(t *testing.T) {
 	for _, expected := range []string{
 		`id="walkthrough-data"`,
 		`class="step-nav-button`,
-		`class="sidebar-layer"`,
+		`class="viewed-switch`,
 		`class="view-unified`,
 		`class="view-split`,
 		`class="fold-button`,
@@ -129,7 +129,7 @@ func TestFormatJSON(t *testing.T) {
 		t.Fatal("--format json wrote HTML")
 	}
 	doc := readAndValidate(t, output)
-	if doc.SchemaVersion != 3 {
+	if doc.SchemaVersion != 4 {
 		t.Fatalf("schema version = %d", doc.SchemaVersion)
 	}
 	if doc.Meta.Staged || doc.Analysis.StubbedFiles == nil || len(doc.Analysis.StubbedFiles) != 0 {
@@ -699,15 +699,19 @@ func validateDocument(t *testing.T, result document.Document) {
 
 func assertSelfContained(t *testing.T, html string) {
 	t.Helper()
+	// ZERO external references: the walkthrough is a complete offline
+	// artifact (mermaid and its CDN were removed in schema v4).
 	attributePattern := regexp.MustCompile(`(?i)(?:src|href)\s*=\s*["']([^"']+)["']`)
 	for _, match := range attributePattern.FindAllStringSubmatch(html, -1) {
-		if match[1] != "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" {
-			t.Fatalf("unexpected external reference: %s", match[1])
-		}
+		t.Fatalf("unexpected external reference: %s", match[1])
 	}
 	urlPattern := regexp.MustCompile(`(?i)url\(([^)]+)\)`)
-	if matches := urlPattern.FindAllStringSubmatch(html, -1); len(matches) > 0 {
-		t.Fatalf("unexpected CSS url references: %#v", matches)
+	for _, match := range urlPattern.FindAllStringSubmatch(html, -1) {
+		reference := strings.Trim(match[1], `"'`)
+		// Same-document fragment references (SVG markers) are not external.
+		if !strings.HasPrefix(reference, "#") {
+			t.Fatalf("unexpected CSS url reference: %s", match[1])
+		}
 	}
 }
 

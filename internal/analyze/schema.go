@@ -5,11 +5,10 @@ import "encoding/json"
 var Schema = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
-  "required": ["title", "overview", "mermaid", "cohorts"],
+  "required": ["title", "overview", "cohorts"],
   "properties": {
     "title": {"type": "string"},
     "overview": {"type": "string"},
-    "mermaid": {"type": ["string", "null"]},
     "cohorts": {
       "type": "array",
       "minItems": 1,
