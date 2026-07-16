@@ -209,6 +209,61 @@ Count planned provider calls; if the plan exceeds 5 calls, print the plan
 single-pass mode this effectively never triggers (staged analysis is M3), but
 the accounting and confirmation path must exist and be tested.
 
+## How to test/validate (required deliverables, per PLAN.md testing policy)
+
+### Unit tests (alongside the code they test)
+
+- Diff parser: fixture patches covering add/delete/rename/binary/quoted
+  paths/no-newline/mode-only entries.
+- Gauntlet: repairJson cases (unescaped quotes, raw newlines — port the
+  prototype's cases and extend), extraction (fenced/prose-wrapped/bare),
+  validation failures, every seatbelt (stray files, bad layer, bad dependsOn).
+- claude-cli output parsing: canned stdout samples for all three shapes
+  (object / event array / bare string) — never call the real CLI in unit tests.
+- Config: precedence (flags > repo > user), TOFU fingerprint stability and
+  change detection.
+- Cache: key derivation (each input changes the key), roundtrip, corrupt
+  cache entry → treated as miss, not a crash.
+
+### E2E tests (`test/e2e`, plain `go test ./test/e2e/...`)
+
+Build the real binary once (TestMain → `go build` into t.TempDir()), then run
+it as a subprocess. Deterministic, no network, CI-safe — use
+`--provider mock` and fixture patches. Required scenarios:
+
+1. **Happy path**: `--diff fixture.patch --provider mock --out out.json`
+   → exit 0; out.json parses; schema rules from §2 hold (files partitioned
+   into cohorts, layers in enum, dependsOn references earlier cohorts only);
+   `meta.cached == false`.
+2. **Cache**: same command again → exit 0, `meta.cached == true`, stderr
+   mentions cache hit; with `--no-cache` → `meta.cached == false`.
+3. **Stdin**: `--diff -` with the patch on stdin → same as (1).
+4. **Git source**: create a throwaway git repo in t.TempDir() (init, commit,
+   branch, commit), run with `--base` → document reflects the branch diff;
+   also cover the empty-branch → uncommitted-changes fallback.
+5. **Failure modes**: empty diff → nonzero exit + clear message; no provider
+   available (PATH stripped, no config) → nonzero exit, error lists probes;
+   unreadable `--diff` path → nonzero exit.
+6. **Trust prompt**: repo with a `.better-git-review.toml` that sets a
+   provider, non-TTY, no accept flag → refuses with instructions; with
+   `--trust-repo-config` → proceeds and a second run no longer prompts.
+
+### Real-provider e2e (opt-in, same package)
+
+Gated on `BGR_E2E_CLAUDE=1` AND `claude` being on PATH — otherwise
+`t.Skip` with a clear message. One scenario: real diff fixture through
+claude-cli end-to-end, assert the document validates. Never runs in CI or by
+default. Do NOT gate any required functionality on this test.
+
+### Validation commands (what the reviewer will run from a clean checkout)
+
+```sh
+go build ./...
+go vet ./...
+go test ./...                 # includes test/e2e, must pass with no network
+BGR_E2E_CLAUDE=1 go test ./test/e2e/ -run Claude -v   # if claude available
+```
+
 ## Out of scope for this gate — do NOT build
 
 HTML/viewer anything (M2), syntax highlighting, blame, staged analysis for
@@ -217,18 +272,13 @@ streaming, Homebrew.
 
 ## Acceptance checklist (the review will check exactly this)
 
-- [ ] `go build ./...`, `go vet ./...`, `go test ./...` all clean
+- [ ] `go build ./...`, `go vet ./...`, `go test ./...` all clean from a
+      clean checkout, no network required
 - [ ] Only allowed dependency in go.mod: BurntSushi/toml
-- [ ] Unit tests: diff parser fixtures (add/delete/rename/binary/no-newline),
-      repairJson cases, validation + seatbelt cases, config precedence,
-      TOFU fingerprint change detection, cache key/roundtrip
-- [ ] `better-git-review --diff <fixture> --provider mock --out x.json`
-      produces a document that passes the schema rules in §2
-- [ ] Same command twice → second run is a cache hit (and `--no-cache` isn't)
-- [ ] Provider auto-detect announces its choice on stderr; with no provider
-      available (PATH stripped), the error lists probes + config guidance
-- [ ] claude-cli provider parses all three output shapes (unit-test with
-      canned stdout samples — do not call the real CLI in tests)
+- [ ] All unit tests from "How to test/validate" present and passing
+- [ ] All six e2e scenarios from "How to test/validate" present and passing
+      (`test/e2e`, subprocess against the built binary, mock provider)
+- [ ] Opt-in real-provider e2e present, skips cleanly when ungated
 - [ ] A real end-to-end run against a real repo diff with claude-cli,
       output attached or quoted in the PR description
 - [ ] PR to `main` from `gate/m1-core-pipeline`, left unmerged, with a

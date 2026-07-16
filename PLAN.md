@@ -228,6 +228,25 @@ fresh run.
   mode for viewer development; goreleaser + GitHub releases; README, LICENSE
   (MIT), CONTRIBUTING with the provider how-to; repo goes public.
 
+## Testing & validation policy *(standing rule, locked 2026-07-16)*
+
+Applies to every gate; every gate handoff MUST carry this into its spec:
+
+1. **Each handoff includes a "How to test/validate" section** with exact
+   commands and expected outcomes — an implementing agent (and the reviewer)
+   must be able to verify the gate without reverse-engineering intent.
+2. **Unit tests** for every non-trivial pure component (parsers, repair,
+   validation, config merging, cache keys, fingerprints).
+3. **End-to-end tests ship in the repo** (`test/e2e`, plain `go test`): they
+   build the actual binary and run it as a subprocess against fixtures,
+   asserting on real outputs, exit codes, and stderr behavior. Deterministic
+   by default (mock provider — no network, no LLM spend, CI-safe).
+4. **Real-provider e2e** exists but is opt-in via env var
+   (e.g. `BGR_E2E_CLAUDE=1`), skipping cleanly when unset or the provider is
+   unavailable. Never runs in CI by default.
+5. **A gate is not reviewable** unless `go build ./...`, `go vet ./...`, and
+   `go test ./...` (including e2e) pass from a clean checkout.
+
 ## Next step
 
 Product decisions #1–14 and both design contracts are locked
