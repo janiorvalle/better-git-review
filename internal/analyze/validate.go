@@ -8,6 +8,7 @@ import (
 )
 
 func ApplySeatbelts(analysis document.Analysis, fileCount int) document.Analysis {
+	analysis.StubbedFiles = []int{}
 	seen := make(map[int]bool, fileCount)
 	type retainedCohort struct {
 		cohort document.Cohort
@@ -126,7 +127,19 @@ func Validate(analysis document.Analysis, fileCount int) []string {
 
 func ValidateComplete(analysis document.Analysis, fileCount int) []string {
 	errors := validateRequiredContent(analysis)
-	return append(errors, Validate(analysis, fileCount)...)
+	errors = append(errors, Validate(analysis, fileCount)...)
+	seenStub := map[int]bool{}
+	for _, fileIndex := range analysis.StubbedFiles {
+		if fileIndex < 0 || fileIndex >= fileCount {
+			errors = append(errors, fmt.Sprintf("stubbedFiles contains out-of-range index %d", fileIndex))
+			continue
+		}
+		if seenStub[fileIndex] {
+			errors = append(errors, fmt.Sprintf("stubbedFiles contains duplicate index %d", fileIndex))
+		}
+		seenStub[fileIndex] = true
+	}
+	return errors
 }
 
 func validateBeforeSeatbelts(analysis document.Analysis, fileCount int) []string {

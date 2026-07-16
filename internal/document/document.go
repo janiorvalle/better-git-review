@@ -1,9 +1,10 @@
 package document
 
 const (
-	SchemaVersion = 2
-	Generator     = "better-git-review v0.2.0"
+	SchemaVersion = 3
 )
+
+var Version = "dev"
 
 var Layers = []string{"schema", "backend", "api", "ui", "tests", "config", "docs", "other"}
 
@@ -54,10 +55,11 @@ type HunkLine struct {
 }
 
 type Analysis struct {
-	Title    string   `json:"title"`
-	Overview string   `json:"overview"`
-	Mermaid  *string  `json:"mermaid"`
-	Cohorts  []Cohort `json:"cohorts"`
+	Title        string   `json:"title"`
+	Overview     string   `json:"overview"`
+	Mermaid      *string  `json:"mermaid"`
+	Cohorts      []Cohort `json:"cohorts"`
+	StubbedFiles []int    `json:"stubbedFiles"`
 }
 
 type Cohort struct {
@@ -76,6 +78,11 @@ type Meta struct {
 	Model     string `json:"model"`
 	Generator string `json:"generator"`
 	Cached    bool   `json:"cached"`
+	Staged    bool   `json:"staged"`
+}
+
+func Generator() string {
+	return "better-git-review " + Version
 }
 
 func IsLayer(layer string) bool {

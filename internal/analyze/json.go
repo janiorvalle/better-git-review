@@ -11,19 +11,26 @@ import (
 )
 
 func ParseResponse(text string) (document.Analysis, error) {
-	candidate, err := ExtractJSON(text)
-	if err != nil {
+	var analysis document.Analysis
+	if err := ParseResponseInto(text, &analysis); err != nil {
 		return document.Analysis{}, err
 	}
-	var analysis document.Analysis
-	if err := json.Unmarshal(candidate, &analysis); err == nil {
-		return analysis, nil
+	return analysis, nil
+}
+
+func ParseResponseInto(text string, target any) error {
+	candidate, err := ExtractJSON(text)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(candidate, target); err == nil {
+		return nil
 	}
 	repaired := RepairJSON(string(candidate))
-	if err := json.Unmarshal([]byte(repaired), &analysis); err != nil {
-		return document.Analysis{}, fmt.Errorf("parse JSON after repair: %w", err)
+	if err := json.Unmarshal([]byte(repaired), target); err != nil {
+		return fmt.Errorf("parse JSON after repair: %w", err)
 	}
-	return analysis, nil
+	return nil
 }
 
 func ExtractJSON(text string) ([]byte, error) {

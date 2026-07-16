@@ -4,15 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
-type Mock struct{}
+type Mock struct {
+	Getenv func(string) string
+	mu     sync.Mutex
+}
 
 func (p *Mock) Name() string { return "mock" }
 
@@ -21,6 +26,9 @@ func (p *Mock) Detect() (bool, string) {
 }
 
 func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
+	if err := p.recordPrompt(prompt); err != nil {
+		return "", err
+	}
 	type promptFile struct {
 		index     int
 		path      string
@@ -42,6 +50,17 @@ func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
 	}
 	if len(files) == 0 {
 		return "", fmt.Errorf("mock provider could not find files in analysis prompt")
+	}
+	if strings.Contains(prompt, "STAGE: FILE_SUMMARY") {
+		file := files[0]
+		if failure := p.getenv("BGR_MOCK_FAIL_SUMMARY"); failure != "" && strings.Contains(file.path, failure) {
+			return `{"summary":`, nil
+		}
+		return string(mustJSON(map[string]any{
+			"summary":    fmt.Sprintf("[mock] %s, +%s/-%s", file.status, file.additions, file.deletions),
+			"layerHint":  mockLayer(file.path),
+			"keySymbols": []string{},
+		})), nil
 	}
 	groups := map[string][]promptFile{}
 	for _, file := range files {
@@ -81,6 +100,37 @@ func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
 	}
 	encoded, err := json.Marshal(analysis)
 	return string(encoded), err
+}
+
+func (p *Mock) getenv(name string) string {
+	if p.Getenv != nil {
+		return p.Getenv(name)
+	}
+	return os.Getenv(name)
+}
+
+func (p *Mock) recordPrompt(prompt string) error {
+	path := p.getenv("BGR_MOCK_PROMPT_LOG")
+	if path == "" {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = fmt.Fprintf(file, "----- MOCK PROMPT -----\n%s\n", prompt)
+	return err
+}
+
+func mustJSON(value any) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return encoded
 }
 
 func mockLayer(path string) string {
