@@ -52,6 +52,7 @@ type FileView struct {
 	Deletions   int
 	Binary      bool
 	Summary     string
+	Stubbed     bool
 	Collapsed   bool
 	UnifiedRows []UnifiedRow
 	SplitRows   []SplitRow
@@ -82,6 +83,10 @@ func buildPage(doc document.Document) (Page, error) {
 		Overview:    doc.Analysis.Overview,
 		Files:       make([]FileView, len(doc.Files)),
 	}
+	stubbedFiles := make(map[int]bool, len(doc.Analysis.StubbedFiles))
+	for _, fileIndex := range doc.Analysis.StubbedFiles {
+		stubbedFiles[fileIndex] = true
+	}
 	for index, file := range doc.Files {
 		unified, split := BuildRows(file, index)
 		page.Additions += file.Additions
@@ -93,6 +98,7 @@ func buildPage(doc document.Document) (Page, error) {
 			Additions:   file.Additions,
 			Deletions:   file.Deletions,
 			Binary:      file.Binary,
+			Stubbed:     stubbedFiles[index],
 			Collapsed:   file.Additions+file.Deletions > 400,
 			UnifiedRows: unified,
 			SplitRows:   split,

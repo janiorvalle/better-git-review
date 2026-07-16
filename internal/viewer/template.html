@@ -120,7 +120,9 @@ h1, h2 { letter-spacing: 0; }
 .status-tag { border-radius: 4px; color: var(--muted); text-transform: capitalize; background: var(--canvas); }
 .file-stat { font: 11px var(--mono); white-space: nowrap; }
 .file-summary { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; }
-.file.collapsed .file-body, .file.collapsed .file-summary { display: none; }
+.file-stub { padding: 8px 12px; border-bottom: 1px solid var(--border); background: #fff8c5; color: #633c01; font-size: 12px; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .file-stub { background: #3b2e00; color: #eac54f; } }
+.file.collapsed .file-body, .file.collapsed .file-summary, .file.collapsed .file-stub { display: none; }
 .binary { padding: 24px; color: var(--muted); text-align: center; font-family: var(--mono); }
 .diff-scroll { overflow-x: auto; }
 .diff-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 12px/20px var(--mono); }
@@ -240,6 +242,7 @@ body[data-view="split"] .view-split { display: block; }
               <span class="file-stat"><span class="plus">+{{$file.Additions}}</span> <span class="minus">−{{$file.Deletions}}</span></span>
             </header>
             {{if $file.Summary}}<div class="file-summary">{{$file.Summary}}</div>{{end}}
+            {{if $file.Stubbed}}<div class="file-stub">No model summary - grouped from path only.</div>{{end}}
             <div class="file-body">
               {{if $file.Binary}}<div class="binary">Binary file</div>{{else}}
               <div class="view-unified diff-scroll">

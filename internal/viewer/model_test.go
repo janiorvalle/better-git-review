@@ -23,3 +23,18 @@ func TestBuildPageCollapsesLargeFiles(t *testing.T) {
 		t.Fatal("file with more than 400 changed lines should start collapsed")
 	}
 }
+
+func TestBuildPageFlagsStubbedFiles(t *testing.T) {
+	page, err := buildPage(document.Document{
+		Files: []document.File{{Path: "first.go"}, {Path: "second.go"}},
+		Analysis: document.Analysis{
+			StubbedFiles: []int{1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Files[0].Stubbed || !page.Files[1].Stubbed {
+		t.Fatalf("stub flags = %#v", page.Files)
+	}
+}
