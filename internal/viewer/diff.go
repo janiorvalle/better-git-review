@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"html/template"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
@@ -109,11 +108,29 @@ func BuildRows(file document.File, fileIndex int) ([]UnifiedRow, []SplitRow) {
 				Code:   highlighter.highlight(line.Text, span),
 			})
 		}
-		applyUnifiedFolds(unified[startUnified:], fmt.Sprintf("u-%d-%d", fileIndex, hunkIndex))
+		applyFolds(
+			unified[startUnified:],
+			fmt.Sprintf("u-%d-%d", fileIndex, hunkIndex),
+			func(row UnifiedRow) bool { return row.Kind == "line" && row.Class == "c" },
+			func(row *UnifiedRow, foldID string, foldCount int) {
+				row.Hidden = true
+				row.FoldID = foldID
+				row.FoldCount = foldCount
+			},
+		)
 
 		startSplit := len(split)
 		split = append(split, buildSplitLines(hunk.Lines, pairs, highlighter)...)
-		applySplitFolds(split[startSplit:], fmt.Sprintf("s-%d-%d", fileIndex, hunkIndex))
+		applyFolds(
+			split[startSplit:],
+			fmt.Sprintf("s-%d-%d", fileIndex, hunkIndex),
+			isSplitContext,
+			func(row *SplitRow, foldID string, foldCount int) {
+				row.Hidden = true
+				row.FoldID = foldID
+				row.FoldCount = foldCount
+			},
+		)
 	}
 	return unified, split
 }
@@ -211,46 +228,30 @@ func cellForLine(line document.HunkLine, highlighter *syntaxHighlighter, span *S
 	return LineCell{Number: number, Code: highlighter.highlight(line.Text, span), Class: line.Type}
 }
 
-func applyUnifiedFolds(rows []UnifiedRow, id string) {
+func applyFolds[T any](
+	rows []T,
+	id string,
+	isContext func(T) bool,
+	mark func(*T, string, int),
+) {
 	for start := 0; start < len(rows); {
-		if rows[start].Kind != "line" || rows[start].Class != "c" {
+		if !isContext(rows[start]) {
 			start++
 			continue
 		}
 		end := start
-		for end < len(rows) && rows[end].Kind == "line" && rows[end].Class == "c" {
+		for end < len(rows) && isContext(rows[end]) {
 			end++
 		}
 		if end-start > FoldThreshold {
 			foldStart, foldEnd := start+3, end-3
-			rows[foldStart].FoldID = id
-			rows[foldStart].FoldCount = foldEnd - foldStart
+			foldCount := foldEnd - foldStart
 			for index := foldStart; index < foldEnd; index++ {
-				rows[index].Hidden = true
-				rows[index].FoldID = id
-			}
-		}
-		start = end
-	}
-}
-
-func applySplitFolds(rows []SplitRow, id string) {
-	for start := 0; start < len(rows); {
-		if !isSplitContext(rows[start]) {
-			start++
-			continue
-		}
-		end := start
-		for end < len(rows) && isSplitContext(rows[end]) {
-			end++
-		}
-		if end-start > FoldThreshold {
-			foldStart, foldEnd := start+3, end-3
-			rows[foldStart].FoldID = id
-			rows[foldStart].FoldCount = foldEnd - foldStart
-			for index := foldStart; index < foldEnd; index++ {
-				rows[index].Hidden = true
-				rows[index].FoldID = id
+				count := 0
+				if index == foldStart {
+					count = foldCount
+				}
+				mark(&rows[index], id, count)
 			}
 		}
 		start = end
@@ -332,8 +333,4 @@ func ChromaCSS(styleName string) (template.CSS, error) {
 		return "", err
 	}
 	return template.CSS(output.String()), nil
-}
-
-func IsPlainHighlighted(value template.HTML, input string) bool {
-	return string(value) == template.HTMLEscapeString(input) && utf8.ValidString(input)
 }

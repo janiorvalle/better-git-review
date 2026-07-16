@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,15 @@ func TestKeyChangesForEveryInput(t *testing.T) {
 }
 
 func TestCacheRoundTripAndCorruption(t *testing.T) {
-	store := Cache{Dir: t.TempDir()}
+	store := Cache{
+		Dir: t.TempDir(),
+		Validate: func(value document.Document) error {
+			if value.Analysis.Title == "" || value.Analysis.Overview == "" {
+				return fmt.Errorf("incomplete analysis")
+			}
+			return nil
+		},
+	}
 	key := Key([]byte("diff"), "mock", "deterministic", 1)
 	value := document.Document{
 		SchemaVersion: document.SchemaVersion,

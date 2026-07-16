@@ -116,7 +116,12 @@ func Run(ctx context.Context, args []string, env Environment) error {
 			stageDecision.InputBytes, stageDecision.Budget)
 	}
 
-	cacheStore, err := cache.Default()
+	cacheStore, err := cache.Default(func(value document.Document) error {
+		if validationErrors := analyze.ValidateComplete(value.Analysis, len(value.Files)); len(validationErrors) > 0 {
+			return fmt.Errorf("%s", analyze.FormatErrors(validationErrors))
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}

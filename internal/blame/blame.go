@@ -1,34 +1,17 @@
 package blame
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/gitexec"
 )
 
-type Runner interface {
-	Run(ctx context.Context, repoDir string, args ...string) ([]byte, error)
-}
-
-type GitRunner struct{}
-
-func (GitRunner) Run(ctx context.Context, repoDir string, args ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, "git", args...)
-	command.Dir = repoDir
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	if err := command.Run(); err != nil {
-		return nil, fmt.Errorf("%s", strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
-}
+type Runner = gitexec.Runner
 
 func Enrich(ctx context.Context, repoDir string, files []document.File, runner Runner) {
 	enrich(ctx, repoDir, files, newLineRange, runner)
@@ -49,7 +32,7 @@ func enrich(
 		return
 	}
 	if runner == nil {
-		runner = GitRunner{}
+		runner = gitexec.ExecRunner{}
 	}
 	for fileIndex := range files {
 		file := &files[fileIndex]
@@ -62,11 +45,7 @@ func enrich(
 				continue
 			}
 			output, err := runner.Run(ctx, repoDir,
-				"-c", "color.ui=false",
-				"blame", "--porcelain", "--no-textconv",
-				"-L", fmt.Sprintf("%d,%d", start, end),
-				"HEAD", "--", file.Path,
-			)
+				gitexec.Harden(gitexec.BlameArgs(fmt.Sprintf("%d,%d", start, end), file.Path)...)...)
 			if err != nil {
 				continue
 			}

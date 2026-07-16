@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/gitexec"
 )
 
 type Options struct {
@@ -51,7 +52,7 @@ func RepoRoot(ctx context.Context, dir string) string {
 	if err != nil {
 		return dir
 	}
-	out, err := run(ctx, abs, nil, "git", "rev-parse", "--show-toplevel")
+	out, err := (gitexec.ExecRunner{}).Run(ctx, abs, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return abs
 	}
@@ -140,21 +141,21 @@ func collectGit(ctx context.Context, repoDir string, opts Options) (Result, erro
 		}
 	}
 	opts.Logf("diffing %s...HEAD in %s ...", base, repoDir)
-	diffBytes, err := run(ctx, repoDir, nil, "git", gitDiffArgs(base+"...HEAD")...)
+	diffBytes, err := (gitexec.ExecRunner{}).Run(ctx, repoDir, gitexec.DiffArgs(base+"...HEAD")...)
 	if err != nil {
 		return Result{}, fmt.Errorf("git diff %s...HEAD: %w", base, err)
 	}
 	rangeText := base + "...HEAD"
 	if len(bytes.TrimSpace(diffBytes)) == 0 {
 		opts.Logf("no committed changes vs %s; falling back to uncommitted changes (git diff HEAD)", base)
-		diffBytes, err = run(ctx, repoDir, nil, "git", gitDiffArgs("HEAD")...)
+		diffBytes, err = (gitexec.ExecRunner{}).Run(ctx, repoDir, gitexec.DiffArgs("HEAD")...)
 		if err != nil {
 			return Result{}, fmt.Errorf("git diff HEAD: %w", err)
 		}
 		rangeText = "HEAD (uncommitted)"
 	}
 	branch := "HEAD"
-	if out, branchErr := run(ctx, repoDir, nil, "git", "rev-parse", "--abbrev-ref", "HEAD"); branchErr == nil {
+	if out, branchErr := (gitexec.ExecRunner{}).Run(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD"); branchErr == nil {
 		branch = strings.TrimSpace(string(out))
 	}
 	repoName := filepath.Base(repoDir)
@@ -170,17 +171,17 @@ func collectGit(ctx context.Context, repoDir string, opts Options) (Result, erro
 }
 
 func DetectBase(ctx context.Context, repoDir string) (string, error) {
-	if out, err := run(ctx, repoDir, nil, "git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
+	if out, err := (gitexec.ExecRunner{}).Run(ctx, repoDir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
 		ref := strings.TrimSpace(string(out))
 		if ref != "" {
 			candidate := strings.TrimPrefix(ref, "refs/remotes/")
-			if _, verifyErr := run(ctx, repoDir, nil, "git", "rev-parse", "--verify", "--quiet", candidate); verifyErr == nil {
+			if _, verifyErr := (gitexec.ExecRunner{}).Run(ctx, repoDir, "rev-parse", "--verify", "--quiet", candidate); verifyErr == nil {
 				return candidate, nil
 			}
 		}
 	}
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		if _, err := run(ctx, repoDir, nil, "git", "rev-parse", "--verify", "--quiet", candidate); err == nil {
+		if _, err := (gitexec.ExecRunner{}).Run(ctx, repoDir, "rev-parse", "--verify", "--quiet", candidate); err == nil {
 			return candidate, nil
 		}
 	}
@@ -204,20 +205,6 @@ func run(ctx context.Context, cwd string, stdin []byte, name string, args ...str
 		return nil, fmt.Errorf("%s", detail)
 	}
 	return stdout.Bytes(), nil
-}
-
-func gitDiffArgs(target string) []string {
-	return []string{
-		"-c", "color.ui=false",
-		"-c", "diff.mnemonicPrefix=false",
-		"diff",
-		"--no-ext-diff",
-		"--no-textconv",
-		"--no-color",
-		"--src-prefix=a/",
-		"--dst-prefix=b/",
-		target,
-	}
 }
 
 var unsafeName = regexp.MustCompile(`[^\w.-]+`)

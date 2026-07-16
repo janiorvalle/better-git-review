@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/pathlayer"
 	"github.com/janiorvalle/better-git-review/internal/provider"
+	"github.com/janiorvalle/better-git-review/internal/xdg"
 )
 
 const StageConcurrency = 4
@@ -231,7 +233,7 @@ func stubSummary(file document.File) FileSummary {
 	return FileSummary{
 		Summary: fmt.Sprintf("Change in %s (%s, +%d/-%d); no model summary was available.",
 			file.Path, file.Status, file.Additions, file.Deletions),
-		LayerHint:  pathLayerHint(file.Path),
+		LayerHint:  pathlayer.Classify(file.Path),
 		KeySymbols: []string{},
 		Stubbed:    true,
 	}
@@ -253,7 +255,7 @@ func analysisFailure(stateDir, raw string, validationErrors []string, cause erro
 func writeDebugOutput(stateDir, raw string) (string, error) {
 	if stateDir == "" {
 		var err error
-		stateDir, err = DefaultStateDir()
+		stateDir, err = xdg.StateDir()
 		if err != nil {
 			return "", err
 		}
@@ -266,15 +268,4 @@ func writeDebugOutput(stateDir, raw string) (string, error) {
 		return "", err
 	}
 	return path, nil
-}
-
-func DefaultStateDir() (string, error) {
-	if value := os.Getenv("XDG_STATE_HOME"); value != "" {
-		return filepath.Join(value, "better-git-review"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".local", "state", "better-git-review"), nil
 }

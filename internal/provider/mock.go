@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/pathlayer"
 )
 
 type Mock struct {
@@ -58,13 +59,13 @@ func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
 		}
 		return string(mustJSON(map[string]any{
 			"summary":    fmt.Sprintf("[mock] %s, +%s/-%s", file.status, file.additions, file.deletions),
-			"layerHint":  mockLayer(file.path),
+			"layerHint":  pathlayer.Classify(file.path),
 			"keySymbols": []string{},
 		})), nil
 	}
 	groups := map[string][]promptFile{}
 	for _, file := range files {
-		layer := mockLayer(file.path)
+		layer := pathlayer.Classify(file.path)
 		groups[layer] = append(groups[layer], file)
 	}
 	var cohorts []document.Cohort
@@ -131,26 +132,6 @@ func mustJSON(value any) []byte {
 		panic(err)
 	}
 	return encoded
-}
-
-func mockLayer(path string) string {
-	lower := strings.ToLower(path)
-	switch {
-	case regexp.MustCompile(`migration|schema|\.sql$|models?/`).MatchString(lower):
-		return "schema"
-	case regexp.MustCompile(`test|spec|__tests__|\.test\.|\.spec\.`).MatchString(lower):
-		return "tests"
-	case regexp.MustCompile(`routes?|api|controller|endpoint|graphql|resolver`).MatchString(lower):
-		return "api"
-	case regexp.MustCompile(`component|page|view|\.css|\.scss|\.html$|frontend|ui/|\.tsx$|\.jsx$|\.vue$`).MatchString(lower):
-		return "ui"
-	case regexp.MustCompile(`\.(json|ya?ml|toml|ini|env|cfg)$|dockerfile|makefile|\.github/`).MatchString(lower):
-		return "config"
-	case regexp.MustCompile(`\.(md|rst|txt)$|docs?/`).MatchString(lower):
-		return "docs"
-	default:
-		return "backend"
-	}
 }
 
 func layerPosition(layer string) int {

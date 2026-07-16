@@ -64,7 +64,16 @@ func TestFoldingBoundary(t *testing.T) {
 		for index := range rows {
 			rows[index] = UnifiedRow{Kind: "line", Class: "c"}
 		}
-		applyUnifiedFolds(rows, "fold")
+		applyFolds(
+			rows,
+			"fold",
+			func(row UnifiedRow) bool { return row.Kind == "line" && row.Class == "c" },
+			func(row *UnifiedRow, foldID string, foldCount int) {
+				row.Hidden = true
+				row.FoldID = foldID
+				row.FoldCount = foldCount
+			},
+		)
 		return rows
 	}
 	atThreshold := build(FoldThreshold)

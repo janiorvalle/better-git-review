@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/janiorvalle/better-git-review/internal/xdg"
 )
 
 type Config struct {
@@ -313,12 +314,5 @@ func cloneProviders(input map[string]ProviderConfig) map[string]ProviderConfig {
 }
 
 func userConfigDir() (string, error) {
-	if value := os.Getenv("XDG_CONFIG_HOME"); value != "" {
-		return value, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config"), nil
+	return xdg.ConfigHome()
 }

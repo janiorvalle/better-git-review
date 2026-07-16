@@ -9,12 +9,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/janiorvalle/better-git-review/internal/analyze"
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/xdg"
 )
 
+type Validator func(document.Document) error
+
 type Cache struct {
-	Dir string
+	Dir      string
+	Validate Validator
 }
 
 func Key(diff []byte, providerName, model string, schemaVersion int) string {
@@ -30,12 +33,12 @@ func Key(diff []byte, providerName, model string, schemaVersion int) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func Default() (Cache, error) {
-	stateDir, err := analyze.DefaultStateDir()
+func Default(validate Validator) (Cache, error) {
+	cacheDir, err := xdg.CacheDir()
 	if err != nil {
 		return Cache{}, err
 	}
-	return Cache{Dir: filepath.Join(stateDir, "cache")}, nil
+	return Cache{Dir: cacheDir, Validate: validate}, nil
 }
 
 func (c Cache) Load(key string) (document.Document, bool) {
@@ -58,7 +61,7 @@ func (c Cache) Load(key string) (document.Document, bool) {
 	if result.SchemaVersion != document.SchemaVersion {
 		return document.Document{}, false
 	}
-	if len(analyze.ValidateComplete(result.Analysis, len(result.Files))) > 0 {
+	if c.Validate != nil && c.Validate(result) != nil {
 		return document.Document{}, false
 	}
 	result.Meta.Cached = true
