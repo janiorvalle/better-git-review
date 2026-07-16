@@ -94,7 +94,7 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stderr, "  provider: %s / model: %s\n", selection.Provider.Name(), selection.Model)
+	fmt.Fprintf(env.Stderr, "  provider: %q / model: %q\n", selection.Provider.Name(), selection.Model)
 
 	if err := guard.Confirm(guard.Plan{
 		Calls: 1, Provider: selection.Provider.Name(), Model: selection.Model,

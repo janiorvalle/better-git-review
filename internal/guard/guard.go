@@ -19,7 +19,7 @@ func Confirm(plan Plan, yes bool, input io.Reader, output io.Writer, inputIsTTY 
 	if plan.Calls <= CallThreshold {
 		return nil
 	}
-	fmt.Fprintf(output, "Analysis plan: %d calls using %s/%s\n", plan.Calls, plan.Provider, plan.Model)
+	fmt.Fprintf(output, "Analysis plan: %d calls using %q/%q\n", plan.Calls, plan.Provider, plan.Model)
 	if yes {
 		return nil
 	}
