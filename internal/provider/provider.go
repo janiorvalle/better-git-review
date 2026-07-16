@@ -64,7 +64,7 @@ func selectNamed(name string, opts SelectOptions) (Selection, error) {
 		model := chooseModel(opts.ModelOverride, providerConfig.Model, "default")
 		return Selection{Provider: &CodexCLI{Model: model}, Model: model}, nil
 	case "openrouter":
-		model := chooseModel(opts.ModelOverride, providerConfig.Model, "anthropic/claude-sonnet-4-5")
+		model := chooseModel(opts.ModelOverride, providerConfig.Model, "anthropic/claude-sonnet-4.5")
 		keyEnv := defaultString(providerConfig.APIKeyEnv, "OPENROUTER_API_KEY")
 		baseURL := defaultString(providerConfig.BaseURL, "https://openrouter.ai/api/v1")
 		return Selection{
