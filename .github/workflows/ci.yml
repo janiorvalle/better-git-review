@@ -19,20 +19,39 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read # checkout
-      pull-requests: read # the paths filter reads PR changed files
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # Full history: the diff base below must be resolvable without a
+          # later (credential-less) fetch, which fails on private repos.
+          fetch-depth: 0
           persist-credentials: false
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: filter
-        with:
-          predicate-quantifier: every
-          filters: |
-            code:
-              - "!**/*.md"
+      # Self-owned docs-only filter (replaces dorny/paths-filter): "code"
+      # is true unless every changed file is Markdown. Defaults to true
+      # whenever the base is unknown (first push, force-push) — skipping
+      # the suite must never be the failure mode.
+      - id: filter
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          code=true
+          if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            mapfile -t changed < <(git diff --name-only "$BASE"...HEAD)
+            if [ "${#changed[@]}" -gt 0 ]; then
+              code=false
+              for file in "${changed[@]}"; do
+                case "$file" in
+                  *.md) ;;
+                  *) code=true; break ;;
+                esac
+              done
+            fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
   verify:
     name: Verify
@@ -47,7 +66,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -71,7 +90,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -93,7 +112,7 @@ jobs:
       - uses: reviewdog/action-actionlint@6fb7acc99f4a1008869fa8a0f09cfca740837d9d # v1.72.0
         with:
           fail_level: error
-      - uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
+      - uses: zizmorcore/zizmor-action@6599ee8b7a49aef6a770f63d261d214911a7ce02 # v0.6.0
         with:
           persona: pedantic
           min-severity: low
