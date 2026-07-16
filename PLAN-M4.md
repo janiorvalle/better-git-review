@@ -209,18 +209,18 @@ the code from being as extensible as the locked design claims:
 34. **Overview diagram is boring, small, and hard to read** *(owner,
     for the M5 design lane — see `reference/overview-diagram-current.png`)*.
     Current state: default-theme mermaid, tiny font, monochrome boxes, no
-    connection to the rest of the page's visual language. Directions to
-    explore at the M5 direction-lock:
-    - *Minimum:* mermaid themeVariables — larger type, layer-colored nodes
-      matching the cohort badges, dark-theme-correct colors, more canvas.
-    - *Stronger (my lean):* drop mermaid entirely and render a native
-      HTML/SVG cohort-flow diagram from the VALIDATED data we already have
-      (cohorts + layers + dependsOn) instead of the model's free-text
-      mermaid string. Wins: layer badge colors reused, nodes clickable
-      (jump to cohort step), consistent typography, kills the last CDN
-      dependency (fully offline), and the diagram can never contradict the
-      actual cohort structure. The model's mermaid field then becomes
-      optional garnish or is dropped from the schema.
+    connection to the rest of the page's visual language.
+    **LOCKED (owner, 2026-07-16): native diagram.** Drop mermaid entirely;
+    the M5 design gate renders a native HTML/SVG cohort-flow diagram from
+    the VALIDATED data we already have (cohorts + layers + dependsOn)
+    instead of the model's free-text mermaid string. Wins: layer badge
+    colors reused, nodes clickable (jump to cohort step), consistent
+    typography, kills the last CDN dependency (the HTML becomes fully
+    offline/self-contained), and the diagram can never contradict the
+    actual cohort structure. Consequences owned by M5: stop requesting the
+    mermaid field in the analysis prompt, remove the CDN script + fallback,
+    drop `analysis.mermaid` from the schema with a schemaVersion bump, and
+    tighten the self-containment e2e allowlist to ZERO external references.
 
 32. **"Viewed" per-file toggle** *(pulled from the deferred list by owner)*.
     GitHub-style checkbox in each file header; checking marks the file
