@@ -31,6 +31,20 @@ func (GitRunner) Run(ctx context.Context, repoDir string, args ...string) ([]byt
 }
 
 func Enrich(ctx context.Context, repoDir string, files []document.File, runner Runner) {
+	enrich(ctx, repoDir, files, newLineRange, runner)
+}
+
+func EnrichUncommitted(ctx context.Context, repoDir string, files []document.File, runner Runner) {
+	enrich(ctx, repoDir, files, oldLineRange, runner)
+}
+
+func enrich(
+	ctx context.Context,
+	repoDir string,
+	files []document.File,
+	lineRange func(document.Hunk) (int, int, bool),
+	runner Runner,
+) {
 	if repoDir == "" {
 		return
 	}
@@ -43,7 +57,7 @@ func Enrich(ctx context.Context, repoDir string, files []document.File, runner R
 			continue
 		}
 		for hunkIndex := range file.Hunks {
-			start, end, ok := newLineRange(file.Hunks[hunkIndex])
+			start, end, ok := lineRange(file.Hunks[hunkIndex])
 			if !ok {
 				continue
 			}
@@ -127,6 +141,22 @@ func newLineRange(hunk document.Hunk) (int, int, bool) {
 		}
 		if line.New > end {
 			end = line.New
+		}
+	}
+	return start, end, start > 0
+}
+
+func oldLineRange(hunk document.Hunk) (int, int, bool) {
+	start, end := 0, 0
+	for _, line := range hunk.Lines {
+		if line.Old == 0 {
+			continue
+		}
+		if start == 0 || line.Old < start {
+			start = line.Old
+		}
+		if line.Old > end {
+			end = line.Old
 		}
 	}
 	return start, end, start > 0

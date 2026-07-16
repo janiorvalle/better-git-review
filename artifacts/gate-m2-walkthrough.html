@@ -334,19 +334,19 @@ body[data-view="split"] .view-split { display: block; }
       <div class="range">artifacts/gate-m2-go-mod.patch</div>
     </div>
     <nav class="step-nav">
-      
+
       <button class="step-nav-button active" type="button" data-step-target="0">
         <span class="step-number">◆</span>
         <span class="step-label">Overview</span>
         <span class="file-count">1</span>
       </button>
-      
+
       <button class="step-nav-button" type="button" data-step-target="1">
         <span class="step-number">1</span>
         <span class="step-label">Backend changes</span>
         <span class="file-count">1</span>
       </button>
-      
+
     </nav>
   </aside>
   <div class="main">
@@ -358,9 +358,9 @@ body[data-view="split"] .view-split { display: block; }
       </div>
     </header>
     <main class="content">
-      
+
       <section class="step active" id="step-overview" data-step="0" data-step-title="Overview">
-        
+
           <div class="eyebrow">Guided walkthrough</div>
           <h1 class="step-title">[MOCK] Guided review</h1>
           <div class="overview-stats">
@@ -372,31 +372,31 @@ body[data-view="split"] .view-split { display: block; }
           <div class="diagram"><pre class="mermaid">graph LR
   A[Mock mode] --&gt; B[No LLM analysis]</pre></div>
           <div class="toc">
-            
+
             <button type="button" class="toc-button" data-step-target="1">
               <span class="step-number">1</span>
               <span><span class="toc-title">Backend changes</span><span class="toc-intent">[mock] Files grouped heuristically as backend.</span></span>
               <span class="layer-badge layer-backend">backend</span>
             </button>
-            
+
           </div>
-        
+
         <div class="pager">
           <button type="button" class="pager-button prev"><span class="pager-direction">← Previous</span><span class="pager-label"></span></button>
           <span class="pager-count"></span>
           <button type="button" class="pager-button next"><span class="pager-direction">Next →</span><span class="pager-label"></span></button>
         </div>
       </section>
-      
+
       <section class="step" id="step-1" data-step="1" data-step-title="Backend changes">
-        
+
           <div class="eyebrow">Step 1 <span class="layer-badge layer-backend">backend</span></div>
           <h2 class="step-title">Backend changes</h2>
           <p class="intent">[mock] Files grouped heuristically as backend.</p>
-          
+
           <div class="narrative">[mock mode] This grouping was produced by path heuristics, not an LLM.</div>
-          
-          
+
+
           <article class="file" data-file="0">
             <header class="file-header">
               <button type="button" class="file-toggle" aria-label="Toggle go.mod" aria-expanded="true">▼</button>
@@ -406,143 +406,143 @@ body[data-view="split"] .view-split { display: block; }
             </header>
             <div class="file-summary">[mock] modified, &#43;6/-1</div>
             <div class="file-body">
-              
+
               <div class="view-unified diff-scroll">
                 <table class="diff-table" aria-label="Unified diff for go.mod">
                 <colgroup><col class="number-column"><col class="number-column"><col class="prefix-column"><col></colgroup>
                 <tbody>
-                
-                  
+
+
                   <tr class="hunk-row"><td colspan="4">@@ module github.com/janiorvalle/better-git-review</td></tr>
-                  
-                
-                  
+
+
+
                   <tr class="line-c"><td class="line-number">2</td><td class="line-number">2</td><td class="line-prefix"> </td><td class="code chroma"></td></tr>
-                
-                  
+
+
                   <tr class="line-c"><td class="line-number">3</td><td class="line-number">3</td><td class="line-prefix"> </td><td class="code chroma"><span class="n">go</span> <span class="mf">1.24</span></td></tr>
-                
-                  
+
+
                   <tr class="line-c"><td class="line-number">4</td><td class="line-number">4</td><td class="line-prefix"> </td><td class="code chroma"></td></tr>
-                
-                  
+
+
                   <tr class="line-d"><td class="line-number">5</td><td class="line-number"></td><td class="line-prefix">-</td><td class="code chroma"><span class="n">require</span> <mark class="word-change"><span class="n">github.com</span><span class="o">/</span><span class="n">BurntSushi</span><span class="o">/</span><span class="n">toml</span> <span class="n">v1.5.0</span></mark></td></tr>
-                
-                  
+
+
                   <tr class="line-a"><td class="line-number"></td><td class="line-number">5</td><td class="line-prefix">&#43;</td><td class="code chroma"><span class="n">require</span> <mark class="word-change"><span class="p">(</span></mark></td></tr>
-                
-                  
+
+
                   <tr class="line-a"><td class="line-number"></td><td class="line-number">6</td><td class="line-prefix">&#43;</td><td class="code chroma">	<span class="n">github.com</span><span class="o">/</span><span class="n">BurntSushi</span><span class="o">/</span><span class="n">toml</span> <span class="n">v1.5.0</span></td></tr>
-                
-                  
+
+
                   <tr class="line-a"><td class="line-number"></td><td class="line-number">7</td><td class="line-prefix">&#43;</td><td class="code chroma">	<span class="n">github.com</span><span class="o">/</span><span class="n">alecthomas</span><span class="o">/</span><span class="n">chroma</span><span class="o">/</span><span class="n">v2</span> <span class="n">v2.24.1</span></td></tr>
-                
-                  
+
+
                   <tr class="line-a"><td class="line-number"></td><td class="line-number">8</td><td class="line-prefix">&#43;</td><td class="code chroma"><span class="p">)</span></td></tr>
-                
-                  
+
+
                   <tr class="line-a"><td class="line-number"></td><td class="line-number">9</td><td class="line-prefix">&#43;</td><td class="code chroma"></td></tr>
-                
-                  
+
+
                   <tr class="line-a"><td class="line-number"></td><td class="line-number">10</td><td class="line-prefix">&#43;</td><td class="code chroma"><span class="n">require</span> <span class="n">github.com</span><span class="o">/</span><span class="n">dlclark</span><span class="o">/</span><span class="n">regexp2</span> <span class="n">v1.12.0</span> <span class="o">//</span> <span class="n">indirect</span></td></tr>
-                
+
                 </tbody></table>
               </div>
               <div class="view-split diff-scroll">
                 <table class="diff-table split-table" aria-label="Split diff for go.mod">
                 <colgroup><col class="split-number-column"><col class="split-code-column"><col class="split-number-column"><col class="split-code-column"></colgroup>
                 <tbody>
-                
-                  
+
+
                   <tr class="hunk-row"><td colspan="4">@@ module github.com/janiorvalle/better-git-review</td></tr>
-                  
-                
-                  
+
+
+
                   <tr>
                     <td class="line-number line-c">2</td>
                     <td class="code chroma split-code line-c"></td>
                     <td class="line-number line-c">2</td>
                     <td class="code chroma split-code line-c"></td>
                   </tr>
-                
-                  
+
+
                   <tr>
                     <td class="line-number line-c">3</td>
                     <td class="code chroma split-code line-c"><span class="n">go</span> <span class="mf">1.24</span></td>
                     <td class="line-number line-c">3</td>
                     <td class="code chroma split-code line-c"><span class="n">go</span> <span class="mf">1.24</span></td>
                   </tr>
-                
-                  
+
+
                   <tr>
                     <td class="line-number line-c">4</td>
                     <td class="code chroma split-code line-c"></td>
                     <td class="line-number line-c">4</td>
                     <td class="code chroma split-code line-c"></td>
                   </tr>
-                
-                  
+
+
                   <tr>
                     <td class="line-number line-d">5</td>
                     <td class="code chroma split-code line-d"><span class="n">require</span> <mark class="word-change"><span class="n">github.com</span><span class="o">/</span><span class="n">BurntSushi</span><span class="o">/</span><span class="n">toml</span> <span class="n">v1.5.0</span></mark></td>
                     <td class="line-number line-a">5</td>
                     <td class="code chroma split-code line-a"><span class="n">require</span> <mark class="word-change"><span class="p">(</span></mark></td>
                   </tr>
-                
-                  
+
+
                   <tr>
                     <td class="line-number line-"></td>
                     <td class="code chroma split-code line- placeholder"></td>
                     <td class="line-number line-a">6</td>
                     <td class="code chroma split-code line-a">	<span class="n">github.com</span><span class="o">/</span><span class="n">BurntSushi</span><span class="o">/</span><span class="n">toml</span> <span class="n">v1.5.0</span></td>
                   </tr>
-                
-                  
+
+
                   <tr>
                     <td class="line-number line-"></td>
                     <td class="code chroma split-code line- placeholder"></td>
                     <td class="line-number line-a">7</td>
                     <td class="code chroma split-code line-a">	<span class="n">github.com</span><span class="o">/</span><span class="n">alecthomas</span><span class="o">/</span><span class="n">chroma</span><span class="o">/</span><span class="n">v2</span> <span class="n">v2.24.1</span></td>
                   </tr>
-                
-                  
+
+
                   <tr>
                     <td class="line-number line-"></td>
                     <td class="code chroma split-code line- placeholder"></td>
                     <td class="line-number line-a">8</td>
                     <td class="code chroma split-code line-a"><span class="p">)</span></td>
                   </tr>
-                
-                  
+
+
                   <tr>
                     <td class="line-number line-"></td>
                     <td class="code chroma split-code line- placeholder"></td>
                     <td class="line-number line-a">9</td>
                     <td class="code chroma split-code line-a"></td>
                   </tr>
-                
-                  
+
+
                   <tr>
                     <td class="line-number line-"></td>
                     <td class="code chroma split-code line- placeholder"></td>
                     <td class="line-number line-a">10</td>
                     <td class="code chroma split-code line-a"><span class="n">require</span> <span class="n">github.com</span><span class="o">/</span><span class="n">dlclark</span><span class="o">/</span><span class="n">regexp2</span> <span class="n">v1.12.0</span> <span class="o">//</span> <span class="n">indirect</span></td>
                   </tr>
-                
+
                 </tbody></table>
               </div>
-              
+
             </div>
           </article>
-          
-        
+
+
         <div class="pager">
           <button type="button" class="pager-button prev"><span class="pager-direction">← Previous</span><span class="pager-label"></span></button>
           <span class="pager-count"></span>
           <button type="button" class="pager-button next"><span class="pager-direction">Next →</span><span class="pager-label"></span></button>
         </div>
       </section>
-      
+
     </main>
   </div>
 </div>

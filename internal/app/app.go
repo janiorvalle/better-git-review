@@ -154,7 +154,11 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	}
 	logf(env.Stderr)("organized into %d cohort(s)", len(result.Analysis.Cohorts))
 	if opts.PR == "" && opts.DiffFile == "" {
-		blame.Enrich(ctx, result.Source.RepoDir, result.Files, nil)
+		if result.Source.Range == "HEAD (uncommitted)" {
+			blame.EnrichUncommitted(ctx, result.Source.RepoDir, result.Files, nil)
+		} else {
+			blame.Enrich(ctx, result.Source.RepoDir, result.Files, nil)
+		}
 	}
 
 	outputPath := opts.Out

@@ -67,6 +67,27 @@ filename file.go
 	}
 }
 
+func TestEnrichUncommittedUsesHeadSideCoordinates(t *testing.T) {
+	runner := &recordingRunner{output: []byte(`aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 7 7 1
+author Reviewer
+author-time 1735689600
+author-tz +0000
+filename file.go
+`)}
+	files := []document.File{{
+		Path: "file.go", Status: "modified",
+		Hunks: []document.Hunk{{Lines: []document.HunkLine{
+			{Type: "a", New: 3, Text: "inserted"},
+			{Type: "c", Old: 7, New: 8, Text: "existing"},
+			{Type: "d", Old: 8, Text: "deleted"},
+		}}},
+	}}
+	EnrichUncommitted(context.Background(), "/repo", files, runner)
+	if joined := strings.Join(runner.args, " "); !strings.Contains(joined, "-L 7,8") {
+		t.Fatalf("uncommitted blame did not use HEAD coordinates: %s", joined)
+	}
+}
+
 type failingRunner struct{}
 
 func (failingRunner) Run(context.Context, string, ...string) ([]byte, error) {
