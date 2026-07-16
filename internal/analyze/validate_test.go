@@ -35,6 +35,26 @@ func TestValidateFailures(t *testing.T) {
 	}
 }
 
+func TestValidateBeforeSeatbeltsRejectsIncompleteContent(t *testing.T) {
+	analysis := document.Analysis{Cohorts: []document.Cohort{{
+		Layer: "backend", Files: []int{0}, FileSummaries: []string{""},
+	}}}
+	errors := validateBeforeSeatbelts(analysis, 1)
+	for _, expected := range []string{
+		"title must not be empty",
+		"overview must not be empty",
+		"cohorts[0].title",
+		"cohorts[0].intent",
+		"cohorts[0].narrative",
+		"cohorts[0].reviewNotes",
+		"cohorts[0].dependsOn",
+	} {
+		if !containsSubstring(errors, expected) {
+			t.Fatalf("missing %q in %#v", expected, errors)
+		}
+	}
+}
+
 func TestApplySeatbelts(t *testing.T) {
 	analysis := document.Analysis{Cohorts: []document.Cohort{
 		{

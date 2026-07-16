@@ -225,6 +225,8 @@ func ensureRepoTrust(opts LoadOptions, repoCfg Config) error {
 		}
 	}
 
+	// --yes intentionally covers both confirmation classes in the CLI contract:
+	// the cost guard and repository-config trust.
 	trust.Repos[repoPath] = fingerprint
 	if err := writeTrust(opts.TrustPath, trust); err != nil {
 		return fmt.Errorf("store repo config trust: %w", err)

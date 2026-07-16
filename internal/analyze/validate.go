@@ -122,11 +122,42 @@ func Validate(analysis document.Analysis, fileCount int) []string {
 
 func validateBeforeSeatbelts(analysis document.Analysis, fileCount int) []string {
 	var errors []string
+	if strings.TrimSpace(analysis.Title) == "" {
+		errors = append(errors, "title must not be empty")
+	}
+	if strings.TrimSpace(analysis.Overview) == "" {
+		errors = append(errors, "overview must not be empty")
+	}
 	if len(analysis.Cohorts) == 0 {
-		return []string{"cohorts must contain at least one item"}
+		errors = append(errors, "cohorts must contain at least one item")
+		return errors
 	}
 	for cohortIndex, cohort := range analysis.Cohorts {
 		prefix := fmt.Sprintf("cohorts[%d]", cohortIndex)
+		if strings.TrimSpace(cohort.Title) == "" {
+			errors = append(errors, prefix+".title must not be empty")
+		}
+		if strings.TrimSpace(cohort.Layer) == "" {
+			errors = append(errors, prefix+".layer must not be empty")
+		}
+		if strings.TrimSpace(cohort.Intent) == "" {
+			errors = append(errors, prefix+".intent must not be empty")
+		}
+		if strings.TrimSpace(cohort.Narrative) == "" {
+			errors = append(errors, prefix+".narrative must not be empty")
+		}
+		if cohort.Files == nil {
+			errors = append(errors, prefix+".files must be present")
+		}
+		if cohort.FileSummaries == nil {
+			errors = append(errors, prefix+".fileSummaries must be present")
+		}
+		if cohort.ReviewNotes == nil {
+			errors = append(errors, prefix+".reviewNotes must be present")
+		}
+		if cohort.DependsOn == nil {
+			errors = append(errors, prefix+".dependsOn must be present")
+		}
 		if len(cohort.FileSummaries) != len(cohort.Files) {
 			errors = append(errors, prefix+".fileSummaries must be parallel to files")
 		}

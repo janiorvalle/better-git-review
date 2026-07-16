@@ -152,7 +152,10 @@ func TestGitSources(t *testing.T) {
 
 	t.Run("uncommitted fallback", func(t *testing.T) {
 		repo := initializeRepo(t)
-		if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("changed\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(repo, "untracked.go"), []byte("package sample\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, "empty.txt"), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		output := filepath.Join(t.TempDir(), "working-tree.json")
@@ -164,6 +167,14 @@ func TestGitSources(t *testing.T) {
 		doc := readAndValidate(t, output)
 		if doc.Source.Range != "HEAD (uncommitted)" {
 			t.Fatalf("range = %q", doc.Source.Range)
+		}
+		paths := make([]string, 0, len(doc.Files))
+		for _, file := range doc.Files {
+			paths = append(paths, file.Path)
+		}
+		slices.Sort(paths)
+		if len(doc.Files) != 2 || !slices.Equal(paths, []string{"empty.txt", "untracked.go"}) {
+			t.Fatalf("untracked file was not collected: %#v", doc.Files)
 		}
 		if !strings.Contains(result.stderr, "falling back to uncommitted changes") {
 			t.Fatalf("fallback was not logged: %s", result.stderr)
