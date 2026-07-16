@@ -1,5 +1,5 @@
 GORELEASER_VERSION ?= v2.17.0
-GORELEASER = go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
+GORELEASER = GOTOOLCHAIN=auto go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 
 .PHONY: build vet test release-check snapshot artifact-smoke verify install-hooks
 
