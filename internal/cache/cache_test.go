@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,8 +30,9 @@ func TestCacheRoundTripAndCorruption(t *testing.T) {
 	value := document.Document{
 		SchemaVersion: document.SchemaVersion,
 		Files:         []document.File{{Path: "a.go"}},
-		Analysis: document.Analysis{Cohorts: []document.Cohort{{
-			Title: "Backend", Layer: "backend", Files: []int{0},
+		Analysis: document.Analysis{Title: "Change", Overview: "Overview", Cohorts: []document.Cohort{{
+			Title: "Backend", Layer: "backend", Intent: "Change backend", Narrative: "Review the backend change.",
+			Files:         []int{0},
 			FileSummaries: []string{"changed"}, ReviewNotes: []string{}, DependsOn: []int{},
 		}}},
 		Meta: document.Meta{Cached: false},
@@ -47,5 +49,18 @@ func TestCacheRoundTripAndCorruption(t *testing.T) {
 	}
 	if _, ok := store.Load(key); ok {
 		t.Fatal("corrupt cache entry should be a miss")
+	}
+
+	value.Analysis.Title = ""
+	value.Analysis.Overview = ""
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Dir, key+".json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Load(key); ok {
+		t.Fatal("schema-invalid cache entry should be a miss")
 	}
 }

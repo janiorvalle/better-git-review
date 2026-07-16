@@ -26,9 +26,9 @@ func (p *OpenRouter) Detect() (bool, string) {
 		return false, "environment reader is not configured"
 	}
 	if p.Getenv(p.APIKeyEnv) == "" {
-		return false, fmt.Sprintf("%s is not set", p.APIKeyEnv)
+		return false, fmt.Sprintf("%s is not set", safeDiagnostic(p.APIKeyEnv, 200))
 	}
-	return true, fmt.Sprintf("%s is set", p.APIKeyEnv)
+	return true, fmt.Sprintf("%s is set", safeDiagnostic(p.APIKeyEnv, 200))
 }
 
 func (p *OpenRouter) Complete(ctx context.Context, prompt string) (string, error) {
@@ -46,7 +46,7 @@ func (p *OpenRouter) complete(ctx context.Context, prompt string, schema json.Ra
 	}
 	apiKey := p.Getenv(p.APIKeyEnv)
 	if apiKey == "" {
-		return nil, fmt.Errorf("%s is not set", p.APIKeyEnv)
+		return nil, fmt.Errorf("%s is not set", safeDiagnostic(p.APIKeyEnv, 200))
 	}
 	requestBody := map[string]any{
 		"model": p.Model,

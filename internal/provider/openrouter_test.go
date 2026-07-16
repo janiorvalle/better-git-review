@@ -70,3 +70,17 @@ func TestOpenRouterEscapesRemoteErrorText(t *testing.T) {
 		t.Fatalf("remote control characters were not escaped: %q", err)
 	}
 }
+
+func TestOpenRouterEscapesConfiguredEnvironmentName(t *testing.T) {
+	provider := &OpenRouter{
+		APIKeyEnv: "KEY\x1b]52;c;YQ==\a",
+		Getenv:    func(string) string { return "" },
+	}
+	available, detail := provider.Detect()
+	if available {
+		t.Fatal("provider should not be available")
+	}
+	if strings.Contains(detail, "\x1b") || !strings.Contains(detail, `\x1b`) {
+		t.Fatalf("environment name was not escaped: %q", detail)
+	}
+}

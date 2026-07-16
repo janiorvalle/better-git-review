@@ -61,13 +61,17 @@ func ApplySeatbelts(analysis document.Analysis, fileCount int) document.Analysis
 		}
 	}
 	if len(leftovers) > 0 {
+		summaries := make([]string, len(leftovers))
+		for index := range summaries {
+			summaries[index] = "No model summary was available for this file."
+		}
 		normalized = append(normalized, document.Cohort{
 			Title:         "Other changes",
 			Layer:         "other",
 			Intent:        "Files the analysis did not assign to a cohort.",
-			Narrative:     "",
+			Narrative:     "Review these unassigned files after the model-defined cohorts.",
 			Files:         leftovers,
-			FileSummaries: make([]string, len(leftovers)),
+			FileSummaries: summaries,
 			ReviewNotes:   []string{},
 			DependsOn:     []int{},
 		})
@@ -120,7 +124,31 @@ func Validate(analysis document.Analysis, fileCount int) []string {
 	return errors
 }
 
+func ValidateComplete(analysis document.Analysis, fileCount int) []string {
+	errors := validateRequiredContent(analysis)
+	return append(errors, Validate(analysis, fileCount)...)
+}
+
 func validateBeforeSeatbelts(analysis document.Analysis, fileCount int) []string {
+	errors := validateRequiredContent(analysis)
+	if len(analysis.Cohorts) == 0 {
+		return errors
+	}
+	for cohortIndex, cohort := range analysis.Cohorts {
+		prefix := fmt.Sprintf("cohorts[%d]", cohortIndex)
+		if len(cohort.FileSummaries) != len(cohort.Files) {
+			errors = append(errors, prefix+".fileSummaries must be parallel to files")
+		}
+		for _, fileIndex := range cohort.Files {
+			if fileIndex < 0 || fileIndex >= fileCount {
+				errors = append(errors, fmt.Sprintf("%s.files contains out-of-range index %d", prefix, fileIndex))
+			}
+		}
+	}
+	return errors
+}
+
+func validateRequiredContent(analysis document.Analysis) []string {
 	var errors []string
 	if strings.TrimSpace(analysis.Title) == "" {
 		errors = append(errors, "title must not be empty")
@@ -157,14 +185,6 @@ func validateBeforeSeatbelts(analysis document.Analysis, fileCount int) []string
 		}
 		if cohort.DependsOn == nil {
 			errors = append(errors, prefix+".dependsOn must be present")
-		}
-		if len(cohort.FileSummaries) != len(cohort.Files) {
-			errors = append(errors, prefix+".fileSummaries must be parallel to files")
-		}
-		for _, fileIndex := range cohort.Files {
-			if fileIndex < 0 || fileIndex >= fileCount {
-				errors = append(errors, fmt.Sprintf("%s.files contains out-of-range index %d", prefix, fileIndex))
-			}
 		}
 	}
 	return errors

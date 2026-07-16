@@ -50,7 +50,7 @@ func (c Cache) Load(key string) (document.Document, bool) {
 	if result.SchemaVersion != document.SchemaVersion {
 		return document.Document{}, false
 	}
-	if len(analyze.Validate(result.Analysis, len(result.Files))) > 0 {
+	if len(analyze.ValidateComplete(result.Analysis, len(result.Files))) > 0 {
 		return document.Document{}, false
 	}
 	result.Meta.Cached = true
