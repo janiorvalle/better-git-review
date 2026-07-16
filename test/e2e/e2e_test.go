@@ -66,6 +66,7 @@ func TestHTMLHappyPathAndSelfContainment(t *testing.T) {
 	for _, expected := range []string{
 		`id="walkthrough-data"`,
 		`class="step-nav-button`,
+		`class="sidebar-layer"`,
 		`class="view-unified`,
 		`class="view-split`,
 		`class="fold-button`,

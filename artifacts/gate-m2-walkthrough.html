@@ -52,18 +52,19 @@
 html { scroll-behavior: smooth; background: var(--canvas); }
 body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.5 var(--ui); }
 button { font: inherit; }
-.app { display: grid; grid-template-columns: 272px minmax(0, 1fr); min-height: 100vh; }
+.app { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 100vh; }
 .sidebar { position: sticky; top: 0; height: 100vh; overflow: auto; border-right: 1px solid var(--border); background: var(--canvas-subtle); padding: 18px 12px; }
 .brand { padding: 0 10px 16px; border-bottom: 1px solid var(--border-muted); margin-bottom: 12px; }
 .brand-name { font-weight: 700; font-size: 13px; color: var(--muted); }
 .brand-title { margin: 4px 0; font-weight: 650; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
 .range { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
 .step-nav { display: grid; gap: 3px; }
-.step-nav-button { width: 100%; display: grid; grid-template-columns: 24px minmax(0,1fr) auto; gap: 8px; align-items: center; border: 1px solid transparent; background: transparent; color: var(--text); padding: 9px 8px; border-radius: 6px; text-align: left; cursor: pointer; }
+.step-nav-button { width: 100%; display: grid; grid-template-columns: 24px minmax(0,1fr) auto auto; gap: 8px; align-items: center; border: 1px solid transparent; background: transparent; color: var(--text); padding: 9px 8px; border-radius: 6px; text-align: left; cursor: pointer; }
 .step-nav-button:hover { background: var(--canvas); border-color: var(--border-muted); }
 .step-nav-button.active { background: var(--canvas); border-color: var(--border); box-shadow: var(--shadow); }
 .step-number { color: var(--muted); font: 11px var(--mono); }
 .step-label { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-layer .layer-badge { min-height: 18px; padding: 0 6px; font-size: 9px; }
 .file-count { color: var(--muted); font: 11px var(--mono); }
 .main { min-width: 0; background: var(--canvas); }
 .toolbar { position: sticky; top: 0; z-index: 20; min-height: 52px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 8px 24px; border-bottom: 1px solid var(--border); background: var(--canvas); }
@@ -313,7 +314,7 @@ body[data-view="split"] .view-split { display: block; }
   .sidebar { position: sticky; height: auto; max-height: 170px; z-index: 30; border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
   .brand { display: none; }
   .step-nav { display: flex; overflow-x: auto; gap: 6px; }
-  .step-nav-button { flex: 0 0 auto; width: auto; grid-template-columns: 20px auto auto; }
+  .step-nav-button { flex: 0 0 auto; width: auto; grid-template-columns: 20px auto auto auto; }
   .step-label { max-width: 180px; }
   .toolbar { top: 61px; padding-inline: 14px; }
   .content { padding: 20px 12px 56px; }
@@ -338,12 +339,14 @@ body[data-view="split"] .view-split { display: block; }
       <button class="step-nav-button active" type="button" data-step-target="0">
         <span class="step-number">◆</span>
         <span class="step-label">Overview</span>
+        <span class="sidebar-layer"></span>
         <span class="file-count">1</span>
       </button>
 
       <button class="step-nav-button" type="button" data-step-target="1">
         <span class="step-number">1</span>
         <span class="step-label">Backend changes</span>
+        <span class="sidebar-layer"><span class="layer-badge layer-backend">backend</span></span>
         <span class="file-count">1</span>
       </button>
 
