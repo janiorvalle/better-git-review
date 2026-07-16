@@ -10,18 +10,21 @@ import (
 const (
 	totalPromptDiffCap = 160_000
 	maxFileDiffCap     = 12_000
-	minFileDiffCap     = 1_500
 )
 
 func BuildPrompt(source document.Source, files []document.File) string {
 	perFileCap := totalPromptDiffCap / max(len(files), 1)
-	perFileCap = min(max(perFileCap, minFileDiffCap), maxFileDiffCap)
+	perFileCap = min(max(perFileCap, 256), maxFileDiffCap)
 
 	var filesBlock strings.Builder
 	for index, file := range files {
 		fmt.Fprintf(&filesBlock, "\n===== FILE %d: %s (%s, +%d/-%d) =====\n",
 			index, file.Path, file.Status, file.Additions, file.Deletions)
 		filesBlock.WriteString(fileDiffText(file, perFileCap))
+	}
+	filesText := filesBlock.String()
+	if len(filesText) > totalPromptDiffCap {
+		filesText = filesText[:totalPromptDiffCap] + "\n... [total diff truncated]\n"
 	}
 
 	description := ""
@@ -57,7 +60,7 @@ Respond with ONLY a JSON object, with no markdown fences or prose, in exactly th
   }]
 }
 
-dependsOn may reference only earlier cohort indexes.`, source.Title, description, len(files), filesBlock.String())
+dependsOn may reference only earlier cohort indexes.`, source.Title, description, len(files), filesText)
 }
 
 func fileDiffText(file document.File, cap int) string {

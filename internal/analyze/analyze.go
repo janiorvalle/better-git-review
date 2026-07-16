@@ -64,6 +64,10 @@ func Run(ctx context.Context, opts Options) (document.Analysis, error) {
 			}
 		}
 
+		if validationErrors := validateBeforeSeatbelts(analysis, len(opts.Files)); len(validationErrors) > 0 {
+			lastErrors = validationErrors
+			continue
+		}
 		analysis = ApplySeatbelts(analysis, len(opts.Files))
 		if validationErrors := Validate(analysis, len(opts.Files)); len(validationErrors) > 0 {
 			lastErrors = validationErrors

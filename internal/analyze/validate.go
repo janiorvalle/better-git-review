@@ -108,6 +108,25 @@ func Validate(analysis document.Analysis, fileCount int) []string {
 	return errors
 }
 
+func validateBeforeSeatbelts(analysis document.Analysis, fileCount int) []string {
+	var errors []string
+	if len(analysis.Cohorts) == 0 {
+		return []string{"cohorts must contain at least one item"}
+	}
+	for cohortIndex, cohort := range analysis.Cohorts {
+		prefix := fmt.Sprintf("cohorts[%d]", cohortIndex)
+		if len(cohort.FileSummaries) != len(cohort.Files) {
+			errors = append(errors, prefix+".fileSummaries must be parallel to files")
+		}
+		for _, fileIndex := range cohort.Files {
+			if fileIndex < 0 || fileIndex >= fileCount {
+				errors = append(errors, fmt.Sprintf("%s.files contains out-of-range index %d", prefix, fileIndex))
+			}
+		}
+	}
+	return errors
+}
+
 func FormatErrors(errors []string) string {
 	return strings.Join(errors, "; ")
 }

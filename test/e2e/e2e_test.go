@@ -1,0 +1,348 @@
+package e2e
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/janiorvalle/better-git-review/internal/document"
+)
+
+var binaryPath string
+
+func TestMain(m *testing.M) {
+	temp, err := os.MkdirTemp("", "better-git-review-e2e-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(temp)
+	binaryPath = filepath.Join(temp, "better-git-review")
+	command := exec.Command("go", "build", "-o", binaryPath, "../../cmd/better-git-review")
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	if err := command.Run(); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
+func TestHappyPath(t *testing.T) {
+	env := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "out.json")
+	result := runCLI(t, env, nil, "--diff", fixturePath(t), "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	doc := readAndValidate(t, output)
+	if doc.Meta.Cached {
+		t.Fatal("first run should not be cached")
+	}
+	if doc.Meta.Provider != "mock" || doc.SchemaVersion != 1 {
+		t.Fatalf("unexpected metadata: %#v", doc.Meta)
+	}
+}
+
+func TestCache(t *testing.T) {
+	env := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "out.json")
+	args := []string{"--diff", fixturePath(t), "--provider", "mock", "--out", output}
+	first := runCLI(t, env, nil, args...)
+	if first.err != nil {
+		t.Fatalf("first command failed: %v\n%s", first.err, first.stderr)
+	}
+	if readAndValidate(t, output).Meta.Cached {
+		t.Fatal("first run should not be cached")
+	}
+	second := runCLI(t, env, nil, args...)
+	if second.err != nil {
+		t.Fatalf("second command failed: %v\n%s", second.err, second.stderr)
+	}
+	if !readAndValidate(t, output).Meta.Cached {
+		t.Fatal("second run should be cached")
+	}
+	if !strings.Contains(second.stderr, "cache hit") {
+		t.Fatalf("stderr did not mention cache hit: %s", second.stderr)
+	}
+	third := runCLI(t, env, nil, append(args, "--no-cache")...)
+	if third.err != nil {
+		t.Fatalf("no-cache command failed: %v\n%s", third.err, third.stderr)
+	}
+	if readAndValidate(t, output).Meta.Cached {
+		t.Fatal("--no-cache run should not be cached")
+	}
+}
+
+func TestStdin(t *testing.T) {
+	env := isolatedEnvironment(t)
+	patch, err := os.ReadFile(fixturePath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "stdin.json")
+	result := runCLI(t, env, patch, "--diff", "-", "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	readAndValidate(t, output)
+}
+
+func TestGitSources(t *testing.T) {
+	t.Run("branch diff", func(t *testing.T) {
+		repo := initializeRepo(t)
+		runGit(t, repo, "switch", "-c", "feature")
+		if err := os.WriteFile(filepath.Join(repo, "feature.go"), []byte("package sample\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repo, "add", "feature.go")
+		runGit(t, repo, "commit", "-m", "feature")
+
+		output := filepath.Join(t.TempDir(), "branch.json")
+		result := runCLI(t, isolatedEnvironment(t), nil,
+			"-C", repo, "--base", "main", "--provider", "mock", "--out", output)
+		if result.err != nil {
+			t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+		}
+		doc := readAndValidate(t, output)
+		if len(doc.Files) != 1 || doc.Files[0].Path != "feature.go" {
+			t.Fatalf("unexpected files: %#v", doc.Files)
+		}
+	})
+
+	t.Run("uncommitted fallback", func(t *testing.T) {
+		repo := initializeRepo(t)
+		if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("changed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		output := filepath.Join(t.TempDir(), "working-tree.json")
+		result := runCLI(t, isolatedEnvironment(t), nil,
+			"-C", repo, "--base", "main", "--provider", "mock", "--out", output)
+		if result.err != nil {
+			t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+		}
+		doc := readAndValidate(t, output)
+		if doc.Source.Range != "HEAD (uncommitted)" {
+			t.Fatalf("range = %q", doc.Source.Range)
+		}
+		if !strings.Contains(result.stderr, "falling back to uncommitted changes") {
+			t.Fatalf("fallback was not logged: %s", result.stderr)
+		}
+	})
+}
+
+func TestFailureModes(t *testing.T) {
+	t.Run("empty diff", func(t *testing.T) {
+		empty := filepath.Join(t.TempDir(), "empty.patch")
+		if err := os.WriteFile(empty, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		result := runCLI(t, isolatedEnvironment(t), nil, "--diff", empty, "--provider", "mock")
+		assertFailureContains(t, result, "diff is empty")
+	})
+
+	t.Run("no provider", func(t *testing.T) {
+		env := isolatedEnvironment(t)
+		env = setEnv(env, "PATH", "")
+		env = removeEnv(env, "OPENROUTER_API_KEY")
+		result := runCLI(t, env, nil, "--diff", fixturePath(t), "--out", filepath.Join(t.TempDir(), "out.json"))
+		assertFailureContains(t, result, "claude-cli")
+		assertFailureContains(t, result, "codex-cli")
+		assertFailureContains(t, result, "openrouter")
+	})
+
+	t.Run("unreadable patch", func(t *testing.T) {
+		result := runCLI(t, isolatedEnvironment(t), nil,
+			"--diff", filepath.Join(t.TempDir(), "missing.patch"), "--provider", "mock")
+		assertFailureContains(t, result, "read diff")
+	})
+}
+
+func TestRepoConfigTrust(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".better-git-review.toml"),
+		[]byte("provider = \"mock\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "trusted.json")
+	args := []string{"-C", repo, "--diff", fixturePath(t), "--out", output}
+
+	first := runCLI(t, env, nil, args...)
+	assertFailureContains(t, first, "--trust-repo-config")
+
+	second := runCLI(t, env, nil, append(args, "--trust-repo-config")...)
+	if second.err != nil {
+		t.Fatalf("trust acceptance failed: %v\n%s", second.err, second.stderr)
+	}
+	readAndValidate(t, output)
+
+	third := runCLI(t, env, nil, args...)
+	if third.err != nil {
+		t.Fatalf("stored trust was not reused: %v\n%s", third.err, third.stderr)
+	}
+}
+
+func TestClaudeProvider(t *testing.T) {
+	if os.Getenv("BGR_E2E_CLAUDE") != "1" {
+		t.Skip("set BGR_E2E_CLAUDE=1 to run the real claude-cli e2e")
+	}
+	if _, err := exec.LookPath("claude"); err != nil {
+		t.Skip("claude executable is not available")
+	}
+	output := filepath.Join(t.TempDir(), "claude.json")
+	ctxEnv := isolatedEnvironment(t)
+	result := runCLIWithTimeout(t, 5*time.Minute, ctxEnv, nil,
+		"--diff", fixturePath(t), "--provider", "claude-cli", "--no-cache", "--out", output)
+	if result.err != nil {
+		t.Fatalf("claude command failed: %v\n%s", result.err, result.stderr)
+	}
+	readAndValidate(t, output)
+}
+
+type commandResult struct {
+	stderr string
+	err    error
+}
+
+func runCLI(t *testing.T, env []string, stdin []byte, args ...string) commandResult {
+	t.Helper()
+	return runCLIWithTimeout(t, 30*time.Second, env, stdin, args...)
+}
+
+func runCLIWithTimeout(t *testing.T, timeout time.Duration, env []string, stdin []byte, args ...string) commandResult {
+	t.Helper()
+	command := exec.Command(binaryPath, args...)
+	command.Env = env
+	command.Stdin = bytes.NewReader(stdin)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	var stdout bytes.Buffer
+	command.Stdout = &stdout
+	timer := time.AfterFunc(timeout, func() {
+		if command.Process != nil {
+			_ = command.Process.Kill()
+		}
+	})
+	err := command.Run()
+	timer.Stop()
+	return commandResult{stderr: stderr.String(), err: err}
+}
+
+func readAndValidate(t *testing.T, path string) document.Document {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result document.Document
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Files) == 0 || len(result.Analysis.Cohorts) == 0 {
+		t.Fatalf("document is incomplete: %#v", result)
+	}
+	seen := make([]int, len(result.Files))
+	for cohortIndex, cohort := range result.Analysis.Cohorts {
+		if !document.IsLayer(cohort.Layer) {
+			t.Fatalf("invalid layer %q", cohort.Layer)
+		}
+		if len(cohort.Files) != len(cohort.FileSummaries) {
+			t.Fatalf("file summaries do not match files: %#v", cohort)
+		}
+		for _, fileIndex := range cohort.Files {
+			if fileIndex < 0 || fileIndex >= len(result.Files) {
+				t.Fatalf("out-of-range file index %d", fileIndex)
+			}
+			seen[fileIndex]++
+		}
+		for _, dependency := range cohort.DependsOn {
+			if dependency < 0 || dependency >= cohortIndex {
+				t.Fatalf("invalid dependency %d on cohort %d", dependency, cohortIndex)
+			}
+		}
+	}
+	for index, count := range seen {
+		if count != 1 {
+			t.Fatalf("file %d appears %d times", index, count)
+		}
+	}
+	return result
+}
+
+func fixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "simple.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func isolatedEnvironment(t *testing.T) []string {
+	t.Helper()
+	root := t.TempDir()
+	env := removeEnv(os.Environ(), "HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME")
+	env = append(env,
+		"HOME="+root,
+		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),
+		"XDG_STATE_HOME="+filepath.Join(root, "state"),
+	)
+	return env
+}
+
+func removeEnv(env []string, names ...string) []string {
+	result := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if slices.Contains(names, key) {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+func setEnv(env []string, key, value string) []string {
+	env = removeEnv(env, key)
+	return append(env, key+"="+value)
+}
+
+func initializeRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-b", "main")
+	runGit(t, repo, "config", "user.email", "e2e@example.com")
+	runGit(t, repo, "config", "user.name", "E2E")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "base.txt")
+	runGit(t, repo, "commit", "-m", "base")
+	return repo
+}
+
+func runGit(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = repo
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func assertFailureContains(t *testing.T, result commandResult, text string) {
+	t.Helper()
+	if result.err == nil {
+		t.Fatalf("expected command failure; stderr: %s", result.stderr)
+	}
+	if !strings.Contains(result.stderr, text) {
+		t.Fatalf("stderr %q does not contain %q", result.stderr, text)
+	}
+}

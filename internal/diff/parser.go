@@ -89,10 +89,6 @@ func Parse(text string) ([]document.File, error) {
 			hunk.Lines = append(hunk.Lines, document.HunkLine{Type: "c", Old: oldLine, New: newLine, Text: line[1:]})
 			oldLine++
 			newLine++
-		case line == "":
-			hunk.Lines = append(hunk.Lines, document.HunkLine{Type: "c", Old: oldLine, New: newLine, Text: ""})
-			oldLine++
-			newLine++
 		case strings.HasPrefix(line, `\ No newline at end of file`):
 			continue
 		}
@@ -102,6 +98,11 @@ func Parse(text string) ([]document.File, error) {
 }
 
 func parseDiffHeader(header string) (string, string, error) {
+	if strings.HasPrefix(header, "a/") {
+		if separator := strings.Index(header, " b/"); separator > 0 {
+			return header[:separator], header[separator+1:], nil
+		}
+	}
 	fields, err := splitGitFields(header)
 	if err != nil {
 		return "", "", fmt.Errorf("parse diff header %q: %w", header, err)

@@ -112,6 +112,8 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	if !opts.NoCache {
 		if cached, ok := cacheStore.Load(cacheKey); ok {
 			logf(env.Stderr)("cache hit")
+			cached.Source = collected.Source
+			cached.Files = files
 			result = cached
 		}
 	}
@@ -166,6 +168,10 @@ func parseArgs(args []string, env Environment) (options, error) {
 		return options{}, err
 	}
 	var result options
+	if len(args) > 0 && isPRNumber(args[0]) {
+		result.PR = args[0]
+		args = args[1:]
+	}
 	flags := flag.NewFlagSet("better-git-review", flag.ContinueOnError)
 	flags.SetOutput(env.Stderr)
 	flags.Usage = func() {
@@ -191,7 +197,10 @@ func parseArgs(args []string, env Environment) (options, error) {
 		return options{}, fmt.Errorf("expected at most one PR number")
 	}
 	if len(positionals) == 1 {
-		if _, err := strconv.Atoi(positionals[0]); err != nil || strings.HasPrefix(positionals[0], "-") {
+		if result.PR != "" {
+			return options{}, fmt.Errorf("expected at most one PR number")
+		}
+		if !isPRNumber(positionals[0]) {
 			return options{}, fmt.Errorf("invalid PR number %q", positionals[0])
 		}
 		result.PR = positionals[0]
@@ -204,6 +213,11 @@ func parseArgs(args []string, env Environment) (options, error) {
 		return options{}, err
 	}
 	return result, nil
+}
+
+func isPRNumber(value string) bool {
+	number, err := strconv.Atoi(value)
+	return err == nil && number >= 0 && !strings.HasPrefix(value, "-")
 }
 
 func writeDocument(path string, value document.Document) error {
