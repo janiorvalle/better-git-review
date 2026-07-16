@@ -76,7 +76,7 @@ func collectPR(ctx context.Context, repoDir string, opts Options) (Result, error
 	if err := json.Unmarshal(metaRaw, &meta); err != nil {
 		return Result{}, fmt.Errorf("parse gh PR metadata: %w", err)
 	}
-	diffBytes, err := run(ctx, repoDir, nil, "gh", "pr", "diff", opts.PR)
+	diffBytes, err := run(ctx, repoDir, nil, "gh", "pr", "diff", opts.PR, "--color", "never")
 	if err != nil {
 		return Result{}, fmt.Errorf("gh pr diff: %w", err)
 	}

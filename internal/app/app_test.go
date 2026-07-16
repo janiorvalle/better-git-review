@@ -17,3 +17,19 @@ func TestParseArgsAllowsPRBeforeFlags(t *testing.T) {
 		t.Fatalf("unexpected options: %#v", opts)
 	}
 }
+
+func TestParseArgsRejectsConflictingSources(t *testing.T) {
+	tests := [][]string{
+		{"123", "--base", "main"},
+		{"--diff", "change.patch", "--base", "main"},
+		{"123", "--diff", "change.patch"},
+	}
+	for _, args := range tests {
+		if _, err := parseArgs(args, Environment{
+			Stderr: &bytes.Buffer{},
+			Getwd:  func() (string, error) { return t.TempDir(), nil },
+		}); err == nil {
+			t.Fatalf("expected conflicting args to fail: %#v", args)
+		}
+	}
+}

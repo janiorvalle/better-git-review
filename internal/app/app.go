@@ -209,6 +209,9 @@ func parseArgs(args []string, env Environment) (options, error) {
 	if result.PR != "" && result.DiffFile != "" {
 		return options{}, fmt.Errorf("PR_NUMBER and --diff cannot be used together")
 	}
+	if result.Base != "" && (result.PR != "" || result.DiffFile != "") {
+		return options{}, fmt.Errorf("--base cannot be used with PR_NUMBER or --diff")
+	}
 	result.RepoDir, err = filepath.Abs(result.RepoDir)
 	if err != nil {
 		return options{}, err
