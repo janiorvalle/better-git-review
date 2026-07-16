@@ -14,6 +14,7 @@ func Parse(text string) ([]document.File, error) {
 	var file *document.File
 	var hunk *document.Hunk
 	oldLine, newLine := 0, 0
+	oldRemaining, newRemaining := 0, 0
 
 	pushFile := func() {
 		if file != nil {
@@ -43,6 +44,9 @@ func Parse(text string) ([]document.File, error) {
 		if file == nil {
 			continue
 		}
+		if hunk != nil && oldRemaining == 0 && newRemaining == 0 {
+			hunk = nil
+		}
 
 		switch {
 		case strings.HasPrefix(line, "new file mode "):
@@ -67,8 +71,9 @@ func Parse(text string) ([]document.File, error) {
 			continue
 		}
 
-		if oldStart, newStart, header, ok := parseHunkHeader(line); ok {
+		if oldStart, newStart, oldCount, newCount, header, ok := parseHunkHeader(line); ok {
 			oldLine, newLine = oldStart, newStart
+			oldRemaining, newRemaining = oldCount, newCount
 			file.Hunks = append(file.Hunks, document.Hunk{Header: header, Lines: []document.HunkLine{}})
 			hunk = &file.Hunks[len(file.Hunks)-1]
 			continue
@@ -81,15 +86,19 @@ func Parse(text string) ([]document.File, error) {
 		case strings.HasPrefix(line, "+"):
 			hunk.Lines = append(hunk.Lines, document.HunkLine{Type: "a", New: newLine, Text: line[1:]})
 			newLine++
+			newRemaining--
 			file.Additions++
 		case strings.HasPrefix(line, "-"):
 			hunk.Lines = append(hunk.Lines, document.HunkLine{Type: "d", Old: oldLine, Text: line[1:]})
 			oldLine++
+			oldRemaining--
 			file.Deletions++
 		case strings.HasPrefix(line, " "):
 			hunk.Lines = append(hunk.Lines, document.HunkLine{Type: "c", Old: oldLine, New: newLine, Text: line[1:]})
 			oldLine++
 			newLine++
+			oldRemaining--
+			newRemaining--
 		case strings.HasPrefix(line, `\ No newline at end of file`):
 			continue
 		}
@@ -175,7 +184,6 @@ func splitGitFields(value string) ([]string, error) {
 }
 
 func parseMetadataPath(path string) string {
-	path = strings.TrimSpace(path)
 	if strings.HasPrefix(path, `"`) {
 		if unquoted, err := strconv.Unquote(path); err == nil {
 			return unquoted
@@ -201,31 +209,37 @@ func isMetadataLine(line string) bool {
 	return false
 }
 
-func parseHunkHeader(line string) (oldStart, newStart int, header string, ok bool) {
+func parseHunkHeader(line string) (oldStart, newStart, oldCount, newCount int, header string, ok bool) {
 	if !strings.HasPrefix(line, "@@ -") {
-		return 0, 0, "", false
+		return 0, 0, 0, 0, "", false
 	}
 	end := strings.Index(line[3:], " @@")
 	if end < 0 {
-		return 0, 0, "", false
+		return 0, 0, 0, 0, "", false
 	}
 	rangePart := line[3 : 3+end]
 	var oldRange, newRange string
 	if _, err := fmt.Sscanf(rangePart, "%s %s", &oldRange, &newRange); err != nil {
-		return 0, 0, "", false
+		return 0, 0, 0, 0, "", false
 	}
-	oldStart, errOld := rangeStart(strings.TrimPrefix(oldRange, "-"))
-	newStart, errNew := rangeStart(strings.TrimPrefix(newRange, "+"))
+	oldStart, oldCount, errOld := parseRange(strings.TrimPrefix(oldRange, "-"))
+	newStart, newCount, errNew := parseRange(strings.TrimPrefix(newRange, "+"))
 	if errOld != nil || errNew != nil {
-		return 0, 0, "", false
+		return 0, 0, 0, 0, "", false
 	}
 	header = strings.TrimSpace(line[3+end+3:])
-	return oldStart, newStart, header, true
+	return oldStart, newStart, oldCount, newCount, header, true
 }
 
-func rangeStart(value string) (int, error) {
+func parseRange(value string) (start, count int, err error) {
+	count = 1
 	if comma := strings.IndexByte(value, ','); comma >= 0 {
+		count, err = strconv.Atoi(value[comma+1:])
+		if err != nil {
+			return 0, 0, err
+		}
 		value = value[:comma]
 	}
-	return strconv.Atoi(value)
+	start, err = strconv.Atoi(value)
+	return start, count, err
 }

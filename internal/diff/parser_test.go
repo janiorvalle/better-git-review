@@ -96,3 +96,33 @@ index 1111111..2222222 100644
 		t.Fatalf("CRLF patch was corrupted: %#v", files)
 	}
 }
+
+func TestParseStopsAtFormatPatchTrailer(t *testing.T) {
+	patch := strings.Join([]string{
+		"diff --git a/a.txt b/a.txt",
+		"index 1111111..2222222 100644",
+		"--- a/a.txt",
+		"+++ b/a.txt",
+		"@@ -1 +1 @@",
+		"-old",
+		"+new",
+		"-- ",
+		"2.50.0",
+		"",
+	}, "\n")
+	files, err := Parse(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Additions != 1 || files[0].Deletions != 1 ||
+		len(files[0].Hunks[0].Lines) != 2 {
+		t.Fatalf("format-patch trailer was parsed as hunk content: %#v", files)
+	}
+}
+
+func TestParseMetadataPathPreservesWhitespace(t *testing.T) {
+	path := " report.txt "
+	if got := parseMetadataPath(path); got != path {
+		t.Fatalf("got %q, want %q", got, path)
+	}
+}
