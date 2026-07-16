@@ -70,8 +70,8 @@ grounded in observations from the M1–M3 gate reviews.
 
 ### Skip (doesn't fit)
 
-- **CLA workflow** — heavyweight for this project's stage; MIT + DCO-style
-  sign-off is enough unless contribution volume changes. Revisit if it takes off.
+- ~~CLA workflow~~ — **moved to adopt by owner decision** (see locked
+  answers): port drawover's CLA workflow.
 - **size-limit budgets** — meaningful for a browser lib; a CLI binary's size
   is not a product constraint. The artifact smoke test covers "did we ship
   something sane."
@@ -81,10 +81,10 @@ grounded in observations from the M1–M3 gate reviews.
 
 ## Part 2 — Platform polish (from dogfooding feedback)
 
-17. **`bgr` binary, shipped natively.** Release archives contain both
-    `better-git-review` and `bgr` (same main, second goreleaser build id, or
-    a rename step in the archive). README documents both; `bgr` becomes the
-    documented short form everywhere after the first mention.
+17. **`bgr` as the PRIMARY name** *(locked by owner)*. The binary is `bgr`
+    (`cmd/bgr`); release archives also ship `better-git-review` as the long
+    alias. README, --help, docs, and examples lead with `bgr` everywhere;
+    the repo name stays `better-git-review` (discoverability).
 18. **First-class Windows.**
     - `--open`: use `cmd /c start` (or `rundll32 url.dll`) on Windows
       instead of silently no-opping.
@@ -140,6 +140,48 @@ refactor. Tests must stay green throughout.
 Explicitly NOT in scope: rewriting the viewer template, changing the
 document schema, touching provider behavior, or any user-visible change
 beyond Part 2's items.
+
+### Part 3b — Architecture review findings (extensibility/maintainability
+pass, owner-requested)
+
+Assessment: `document` as a pure shared-vocabulary hub, the provider
+contract, and the pure `diff`/`viewer` packages are sound. Four gaps keep
+the code from being as extensible as the locked design claims:
+
+27. **Make diff sources a real adapter layer.** Locked decision #7 promised
+    forge adapters, but `internal/source` is hardcoded functions with `gh`
+    baked in — adding GitLab today means editing core files. Introduce a
+    `Source` interface + registry symmetric to providers (Name / Detect /
+    Collect), with GitHub as the first adapter and git/patch as the core
+    sources. New forges become one new file.
+28. **Decompose `app.Run`.** It inlines args → config → source → provider →
+    guard → cache → analyze → render → write; every new flag ripples
+    through it. Split into pipeline stages with narrow inputs/outputs so
+    additions stay local and stages are unit-testable.
+29. **Single source of truth for the schema.** The structured-output JSON
+    schema (`analyze.Schema`) and the Go types (`document`) describe the
+    same shape in two places. Add a reflection-based sync test (or co-locate
+    schema with the types) so they cannot drift.
+30. **Encode the layering matrix in the policy test** (extends #15):
+    `document` imports no internal packages; `diff`/`viewer`/`cache` depend
+    only on `document` (+ small utils); provider adapters import only the
+    provider contract + stdlib; nothing imports `app`. The architecture then
+    defends itself against every future PR.
+31. **(Recommended-optional) Provider adapter subpackages.** Move each
+    adapter under its own package so isolation is structural, not
+    conventional. Borderline at four adapters; leans yes given the
+    OSS-contribution goal. Owner may defer.
+
+## Locked answers (owner review, 2026-07-16)
+
+1. Part 1: adopt ALL — the thirteen plus CLA (moved from skip).
+2. Attestation: GitHub-native `actions/attest-build-provenance`.
+3. Naming: **bgr is primary everywhere**; `better-git-review` ships as the
+   long alias; repo name unchanged.
+4. Windows CI: full e2e suite REQUIRED on windows-latest — real Windows
+   users are waiting.
+5. Part 3 approved in full; Part 3b added at owner's request (deeper
+   architecture pass). #31 awaits an explicit yes/no.
 
 ---
 
@@ -217,19 +259,7 @@ template structure).
   redesign toward the CodeRabbit concept → PR under the same review
   discipline (owner reviews visually; e2e suite must stay green).
 
-## Open questions for review
+## Remaining open questions
 
-1. Part 1 adopt-list: all thirteen, or trim? (My take: all — each is cheap
-   and this repo is headed public. The only debatable one is gitleaks'
-   pre-commit hook, which adds a local tool dependency for contributors;
-   CI-only scanning is the fallback position.)
-2. Attestation (#8): GitHub-native attest action, or full SLSA generator?
-   (My take: the attest action — one step, no new infra.)
-3. `bgr` (#17): second binary in the same archive, or `bgr` as the primary
-   name everywhere with `better-git-review` kept as the long alias? Naming
-   is still repo-owner territory.
-4. Windows e2e (#18): require the full subprocess e2e suite on the Windows
-   CI job, or accept build + unit as the gate? (My take: require it — the
-   suite is deterministic, and Windows path bugs live exactly in those
-   subprocess/fixture seams.)
-5. Anything in Part 3 you'd rather leave alone?
+1. #31 provider adapter subpackages — yes or defer?
+2. #26 hotfix timing — immediately, or batched into M4?
