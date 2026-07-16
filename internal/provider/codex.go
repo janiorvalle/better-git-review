@@ -37,11 +37,23 @@ func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) 
 	}
 	defer os.Remove(outputPath)
 
+	// The diff is already in the prompt, so the agent gets no host-reading,
+	// connector, subagent, image, or web tools.
 	args := []string{
 		"exec",
 		"--ephemeral",
 		"--ignore-user-config",
 		"--ignore-rules",
+		"--disable", "apps",
+		"--disable", "goals",
+		"--disable", "hooks",
+		"--disable", "multi_agent",
+		"--disable", "remote_plugin",
+		"--disable", "shell_snapshot",
+		"--disable", "shell_tool",
+		"--disable", "unified_exec",
+		"--config", `web_search="disabled"`,
+		"--config", "tools_view_image=false",
 		"--skip-git-repo-check",
 		"--sandbox", "read-only",
 		"--output-last-message", outputPath,

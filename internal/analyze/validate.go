@@ -9,9 +9,13 @@ import (
 
 func ApplySeatbelts(analysis document.Analysis, fileCount int) document.Analysis {
 	seen := make(map[int]bool, fileCount)
-	normalized := make([]document.Cohort, 0, len(analysis.Cohorts)+1)
+	type retainedCohort struct {
+		cohort document.Cohort
+	}
+	retained := make([]retainedCohort, 0, len(analysis.Cohorts))
+	originalToNormalized := make(map[int]int, len(analysis.Cohorts))
 
-	for _, cohort := range analysis.Cohorts {
+	for originalIndex, cohort := range analysis.Cohorts {
 		if !document.IsLayer(cohort.Layer) {
 			cohort.Layer = "other"
 		}
@@ -38,8 +42,16 @@ func ApplySeatbelts(analysis document.Analysis, fileCount int) document.Analysis
 		}
 		cohort.Files = files
 		cohort.FileSummaries = summaries
-		cohort.DependsOn = filterDependencies(cohort.DependsOn, len(normalized))
-		normalized = append(normalized, cohort)
+		originalToNormalized[originalIndex] = len(retained)
+		retained = append(retained, retainedCohort{cohort: cohort})
+	}
+
+	normalized := make([]document.Cohort, 0, len(retained)+1)
+	for normalizedIndex, item := range retained {
+		item.cohort.DependsOn = remapDependencies(
+			item.cohort.DependsOn, originalToNormalized, normalizedIndex,
+		)
+		normalized = append(normalized, item.cohort)
 	}
 
 	var leftovers []int
@@ -131,15 +143,16 @@ func FormatErrors(errors []string) string {
 	return strings.Join(errors, "; ")
 }
 
-func filterDependencies(dependencies []int, currentIndex int) []int {
+func remapDependencies(dependencies []int, indexMap map[int]int, currentIndex int) []int {
 	seen := map[int]bool{}
 	result := make([]int, 0, len(dependencies))
 	for _, dependency := range dependencies {
-		if dependency < 0 || dependency >= currentIndex || seen[dependency] {
+		remapped, ok := indexMap[dependency]
+		if !ok || remapped < 0 || remapped >= currentIndex || seen[remapped] {
 			continue
 		}
-		seen[dependency] = true
-		result = append(result, dependency)
+		seen[remapped] = true
+		result = append(result, remapped)
 	}
 	return result
 }

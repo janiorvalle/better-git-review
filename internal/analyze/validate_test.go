@@ -69,6 +69,24 @@ func TestApplySeatbelts(t *testing.T) {
 	}
 }
 
+func TestApplySeatbeltsRemapsDependenciesAfterDroppingCohorts(t *testing.T) {
+	analysis := document.Analysis{Cohorts: []document.Cohort{
+		{Title: "Empty", Layer: "other", Files: []int{}, FileSummaries: []string{}},
+		{
+			Title: "Backend", Layer: "backend", Files: []int{0},
+			FileSummaries: []string{"backend"}, DependsOn: []int{},
+		},
+		{
+			Title: "Tests", Layer: "tests", Files: []int{1},
+			FileSummaries: []string{"tests"}, DependsOn: []int{1},
+		},
+	}}
+	got := ApplySeatbelts(analysis, 2)
+	if len(got.Cohorts) != 2 || !slices.Equal(got.Cohorts[1].DependsOn, []int{0}) {
+		t.Fatalf("dependencies were not remapped: %#v", got.Cohorts)
+	}
+}
+
 func containsSubstring(values []string, substring string) bool {
 	for _, value := range values {
 		if strings.Contains(value, substring) {

@@ -99,7 +99,23 @@ func Parse(text string) ([]document.File, error) {
 
 func parseDiffHeader(header string) (string, string, error) {
 	if strings.HasPrefix(header, "a/") {
-		if separator := strings.Index(header, " b/"); separator > 0 {
+		var separators []int
+		for offset := 0; offset < len(header); {
+			relative := strings.Index(header[offset:], " b/")
+			if relative < 0 {
+				break
+			}
+			separator := offset + relative
+			separators = append(separators, separator)
+			oldPath := strings.TrimPrefix(header[:separator], "a/")
+			newPath := strings.TrimPrefix(header[separator+1:], "b/")
+			if oldPath == newPath {
+				return header[:separator], header[separator+1:], nil
+			}
+			offset = separator + 3
+		}
+		if len(separators) > 0 {
+			separator := separators[0]
 			return header[:separator], header[separator+1:], nil
 		}
 	}
