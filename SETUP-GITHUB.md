@@ -1,11 +1,22 @@
-# bgr public-flip checklist (owner-only, settings-level)
+# bgr public-flip requirements (settings-level)
 
 Adapted from drawover's `SETUP-GITHUB.local.md`. Everything in-code
 (workflows, gitleaks, Scorecard, CLA action, SECURITY.md, attestation)
-already landed in Gate M4 — this checklist is the GitHub-settings half
-that only the repo admin can apply. Run it at the endgame:
-**M6 merged → design PR merged → docs voice pass → THIS → tag v1.1.0 →
-flip public.**
+already landed in Gate M4.
+
+**Owner decision (2026-07-16): these settings are applied via Terraform,
+not by hand.** A separate PRIVATE repo (working name
+`janiorvalle/github-baseline`) holds an `oss-baseline` module using the
+GitHub provider, instantiated for `better-git-review` AND `drawoverlay`
+(imported, so the module is validated against the already-trusted repo).
+Fine-grained admin PAT via env var only; gitignored local state
+(recoverable via import); scheduled `terraform plan` as drift detection.
+This document is therefore the module's REQUIREMENTS SPEC plus the few
+non-Terraform items (CLA signatures branch, pre-public gitleaks history
+scan, artifacts decision, npm-side bindings for drawover).
+
+Endgame order: **M6 merged → design PR merged → docs voice pass →
+baseline repo built + applied → tag v1.1.0 → flip public.**
 
 ## Before flipping public
 
