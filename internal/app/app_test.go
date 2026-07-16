@@ -2,7 +2,11 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"strings"
 	"testing"
+
+	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
 func TestParseArgsAllowsPRBeforeFlags(t *testing.T) {
@@ -56,5 +60,19 @@ func TestParseArgsRejectsUnknownFormat(t *testing.T) {
 		Getwd:  func() (string, error) { return t.TempDir(), nil },
 	}); err == nil {
 		t.Fatal("expected unknown format to fail")
+	}
+}
+
+func TestRunVersionDoesNotRequireARepositoryOrProvider(t *testing.T) {
+	var output bytes.Buffer
+	if err := Run(context.Background(), []string{"--version"}, Environment{
+		Stdout: &output,
+		Stderr: &bytes.Buffer{},
+		Getwd:  func() (string, error) { return t.TempDir(), nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(output.String()) != document.Generator() {
+		t.Fatalf("version output = %q", output.String())
 	}
 }

@@ -47,6 +47,7 @@ type options struct {
 	NoCache         bool
 	Yes             bool
 	TrustRepoConfig bool
+	Version         bool
 }
 
 func Run(ctx context.Context, args []string, env Environment) error {
@@ -54,6 +55,10 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	opts, err := parseArgs(args, env)
 	if err != nil {
 		return err
+	}
+	if opts.Version {
+		fmt.Fprintln(env.Stdout, document.Generator())
+		return nil
 	}
 
 	repoRoot := source.RepoRoot(ctx, opts.RepoDir)
@@ -102,10 +107,13 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	}
 	fmt.Fprintf(env.Stderr, "  provider: %q / model: %q\n", selection.Provider.Name(), selection.Model)
 
-	if err := guard.Confirm(guard.Plan{
-		Calls: 1, Provider: selection.Provider.Name(), Model: selection.Model,
-	}, opts.Yes, env.Stdin, env.Stderr, isTTY(env.Stdin)); err != nil {
+	stageDecision, err := analyze.DecideStaging(files, os.Getenv)
+	if err != nil {
 		return err
+	}
+	if stageDecision.Staged {
+		logf(env.Stderr)("analysis input is %d bytes (budget %d); using staged analysis",
+			stageDecision.InputBytes, stageDecision.Budget)
 	}
 
 	cacheStore, err := cache.Default()
@@ -116,7 +124,8 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	var result document.Document
 	if !opts.NoCache {
 		if cached, ok := cacheStore.Load(cacheKey); ok {
-			if len(analyze.ValidateComplete(cached.Analysis, len(files))) == 0 {
+			if cached.Meta.Staged == stageDecision.Staged &&
+				len(analyze.ValidateComplete(cached.Analysis, len(files))) == 0 {
 				logf(env.Stderr)("cache hit")
 				cached.Source = collected.Source
 				cached.Files = files
@@ -125,11 +134,22 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		}
 	}
 	if result.SchemaVersion == 0 {
+		if err := guard.Confirm(
+			guard.AnalysisPlan(len(files), stageDecision.Staged, selection.Provider.Name(), selection.Model),
+			opts.Yes,
+			env.Stdin,
+			env.Stderr,
+			isTTY(env.Stdin),
+		); err != nil {
+			return err
+		}
 		analysis, analysisErr := analyze.Run(ctx, analyze.Options{
 			Provider: selection.Provider,
 			Source:   collected.Source,
 			Files:    files,
 			Logf:     logf(env.Stderr),
+			Staged:   stageDecision.Staged,
+			Budget:   stageDecision.Budget,
 		})
 		if analysisErr != nil {
 			return analysisErr
@@ -142,8 +162,9 @@ func Run(ctx context.Context, args []string, env Environment) error {
 			Meta: document.Meta{
 				Provider:  selection.Provider.Name(),
 				Model:     selection.Model,
-				Generator: document.Generator,
+				Generator: document.Generator(),
 				Cached:    false,
+				Staged:    stageDecision.Staged,
 			},
 		}
 		if !opts.NoCache {
@@ -215,6 +236,7 @@ func parseArgs(args []string, env Environment) (options, error) {
 	flags.BoolVar(&result.NoCache, "no-cache", false, "bypass analysis cache")
 	flags.BoolVar(&result.Yes, "yes", false, "skip confirmations")
 	flags.BoolVar(&result.TrustRepoConfig, "trust-repo-config", false, "trust current repo provider config")
+	flags.BoolVar(&result.Version, "version", false, "print version")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return options{}, err
@@ -347,5 +369,6 @@ FLAGS
   --no-cache             Bypass the analysis cache
   --yes                  Skip interactive confirmations
   --trust-repo-config    Trust the current repo provider config fingerprint
+  --version              Print version
   -h, --help             Show help
 `

@@ -23,3 +23,14 @@ func TestConfirmCostGuard(t *testing.T) {
 		t.Fatalf("interactive yes should approve: %v", err)
 	}
 }
+
+func TestAnalysisPlanArithmetic(t *testing.T) {
+	single := AnalysisPlan(50, false, "mock", "test")
+	if single.Calls != 1 || single.MaxCalls != 2 {
+		t.Fatalf("single-pass plan = %#v", single)
+	}
+	staged := AnalysisPlan(6, true, "mock", "test")
+	if staged.Calls != 7 || staged.MaxCalls != 14 {
+		t.Fatalf("staged plan = %#v", staged)
+	}
+}

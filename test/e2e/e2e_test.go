@@ -49,8 +49,11 @@ func TestHappyPath(t *testing.T) {
 	if doc.Meta.Cached {
 		t.Fatal("first run should not be cached")
 	}
-	if doc.Meta.Provider != "mock" || doc.SchemaVersion != 2 {
+	if doc.Meta.Provider != "mock" || doc.SchemaVersion != 3 {
 		t.Fatalf("unexpected metadata: %#v", doc.Meta)
+	}
+	if doc.Meta.Staged {
+		t.Fatal("small diff unexpectedly used staged analysis")
 	}
 }
 
@@ -121,8 +124,116 @@ func TestFormatJSON(t *testing.T) {
 		t.Fatal("--format json wrote HTML")
 	}
 	doc := readAndValidate(t, output)
-	if doc.SchemaVersion != 2 {
+	if doc.SchemaVersion != 3 {
 		t.Fatalf("schema version = %d", doc.SchemaVersion)
+	}
+	if doc.Meta.Staged || doc.Analysis.StubbedFiles == nil || len(doc.Analysis.StubbedFiles) != 0 {
+		t.Fatalf("unexpected single-pass staging metadata: %#v %#v", doc.Meta, doc.Analysis.StubbedFiles)
+	}
+}
+
+func TestStagedHappyPath(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	output := filepath.Join(t.TempDir(), "staged.html")
+	result := runCLI(t, env, nil,
+		"--diff", fixturePath(t), "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("staged command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	if !doc.Meta.Staged || len(doc.Analysis.StubbedFiles) != 0 {
+		t.Fatalf("unexpected staged metadata: %#v %#v", doc.Meta, doc.Analysis.StubbedFiles)
+	}
+	for _, file := range doc.Files {
+		if !strings.Contains(html, file.Path) {
+			t.Fatalf("HTML omitted %q", file.Path)
+		}
+	}
+}
+
+func TestStagedStubDegradation(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	env = setEnv(env, "BGR_MOCK_FAIL_SUMMARY", "service_test.go")
+	output := filepath.Join(t.TempDir(), "stubbed.html")
+	result := runCLI(t, env, nil,
+		"--diff", fixturePath(t), "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("stubbed command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	if len(doc.Analysis.StubbedFiles) != 1 ||
+		doc.Files[doc.Analysis.StubbedFiles[0]].Path != "internal/service_test.go" {
+		t.Fatalf("unexpected stubbed files: %#v", doc.Analysis.StubbedFiles)
+	}
+	if !strings.Contains(html, "No model summary - grouped from path only.") {
+		t.Fatal("HTML did not visibly flag the stubbed file")
+	}
+}
+
+func TestStagedCostGuard(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	output := filepath.Join(t.TempDir(), "guard.json")
+	args := []string{
+		"--diff", stagedFixturePath(t), "--provider", "mock",
+		"--format", "json", "--out", output,
+	}
+	refused := runCLI(t, env, nil, args...)
+	assertFailureContains(t, refused, "7 calls")
+	assertFailureContains(t, refused, "up to 14")
+	assertFailureContains(t, refused, "--yes")
+
+	approved := runCLI(t, env, nil, append(args, "--yes")...)
+	if approved.err != nil {
+		t.Fatalf("--yes staged command failed: %v\n%s", approved.err, approved.stderr)
+	}
+	if doc := readAndValidate(t, output); !doc.Meta.Staged {
+		t.Fatal("approved run was not staged")
+	}
+}
+
+func TestDelimiterInjectionIsNeutralized(t *testing.T) {
+	env := isolatedEnvironment(t)
+	promptLog := filepath.Join(t.TempDir(), "prompt.log")
+	env = setEnv(env, "BGR_MOCK_PROMPT_LOG", promptLog)
+	output := filepath.Join(t.TempDir(), "delimiter.json")
+	result := runCLI(t, env, nil,
+		"--diff", delimiterFixturePath(t), "--provider", "mock",
+		"--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("delimiter command failed: %v\n%s", result.err, result.stderr)
+	}
+	promptBytes, err := os.ReadFile(promptLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := string(promptBytes)
+	if strings.Contains(prompt, "BEGIN_UNTRUSTED_CHANGE_DATA") ||
+		strings.Contains(prompt, "END_UNTRUSTED_CHANGE_DATA") {
+		t.Fatalf("legacy delimiter survived prompt assembly:\n%s", prompt)
+	}
+	beginPattern := regexp.MustCompile(`BEGIN_UNTRUSTED_[0-9a-f]{16}`)
+	endPattern := regexp.MustCompile(`END_UNTRUSTED_[0-9a-f]{16}`)
+	begin := beginPattern.FindString(prompt)
+	end := endPattern.FindString(prompt)
+	if begin == "" || end == "" || strings.Count(prompt, begin) != 2 || strings.Count(prompt, end) != 2 {
+		t.Fatalf("nonce delimiter framing is invalid:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "[neutralized untrusted delimiter]") {
+		t.Fatal("prompt did not contain the neutralized fixture marker")
+	}
+}
+
+func TestSinglePassRegression(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "single.json")
+	result := runCLI(t, isolatedEnvironment(t), nil,
+		"--diff", fixturePath(t), "--provider", "mock",
+		"--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("single-pass command failed: %v\n%s", result.err, result.stderr)
+	}
+	doc := readAndValidate(t, output)
+	if doc.Meta.Staged {
+		t.Fatal("small diff unexpectedly staged")
 	}
 }
 
@@ -164,21 +275,21 @@ func TestBlameLocalGitOnly(t *testing.T) {
 	}
 }
 
-func TestCacheSchemaBumpDoesNotReuseV1(t *testing.T) {
+func TestCacheSchemaBumpDoesNotReuseV2(t *testing.T) {
 	env := isolatedEnvironment(t)
 	stateHome := envValue(env, "XDG_STATE_HOME")
 	diffBytes, err := os.ReadFile(fixturePath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	v1Key := cache.Key(diffBytes, "mock", "deterministic", 1)
+	v2Key := cache.Key(diffBytes, "mock", "deterministic", 2)
 	cacheDir := filepath.Join(stateHome, "better-git-review", "cache")
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stale := document.Document{SchemaVersion: 1}
+	stale := document.Document{SchemaVersion: 2}
 	staleBytes, _ := json.Marshal(stale)
-	if err := os.WriteFile(filepath.Join(cacheDir, v1Key+".json"), staleBytes, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(cacheDir, v2Key+".json"), staleBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(t.TempDir(), "out.json")
@@ -189,9 +300,9 @@ func TestCacheSchemaBumpDoesNotReuseV1(t *testing.T) {
 	}
 	doc := readAndValidate(t, output)
 	if doc.Meta.Cached || strings.Contains(result.stderr, "cache hit") {
-		t.Fatal("v1 cache entry was reused")
+		t.Fatal("v2 cache entry was reused")
 	}
-	if cache.Key(diffBytes, "mock", "deterministic", 2) == v1Key {
+	if cache.Key(diffBytes, "mock", "deterministic", 3) == v2Key {
 		t.Fatal("schema bump did not change cache key")
 	}
 }
@@ -223,6 +334,43 @@ func TestCache(t *testing.T) {
 	}
 	if readAndValidate(t, output).Meta.Cached {
 		t.Fatal("--no-cache run should not be cached")
+	}
+}
+
+func TestCacheDoesNotCrossAnalysisStrategies(t *testing.T) {
+	baseEnv := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "strategy.json")
+	args := []string{
+		"--diff", fixturePath(t), "--provider", "mock",
+		"--format", "json", "--out", output,
+	}
+	singleEnv := setEnv(baseEnv, "BGR_STAGE_BUDGET", "999999")
+	first := runCLI(t, singleEnv, nil, args...)
+	if first.err != nil {
+		t.Fatalf("single-pass command failed: %v\n%s", first.err, first.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Staged {
+		t.Fatal("first run unexpectedly staged")
+	}
+
+	stagedEnv := setEnv(baseEnv, "BGR_STAGE_BUDGET", "1")
+	second := runCLI(t, stagedEnv, nil, args...)
+	if second.err != nil {
+		t.Fatalf("staged command failed: %v\n%s", second.err, second.stderr)
+	}
+	if doc := readAndValidate(t, output); !doc.Meta.Staged || doc.Meta.Cached {
+		t.Fatalf("single-pass cache crossed into staged run: %#v", doc.Meta)
+	}
+	if strings.Contains(second.stderr, "cache hit") {
+		t.Fatal("staged run reused single-pass cache")
+	}
+
+	third := runCLI(t, singleEnv, nil, args...)
+	if third.err != nil {
+		t.Fatalf("second single-pass command failed: %v\n%s", third.err, third.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Staged || doc.Meta.Cached {
+		t.Fatalf("staged cache crossed into single-pass run: %#v", doc.Meta)
 	}
 }
 
@@ -480,6 +628,16 @@ func validateDocument(t *testing.T, result document.Document) {
 	if len(result.Files) == 0 || len(result.Analysis.Cohorts) == 0 {
 		t.Fatalf("document is incomplete: %#v", result)
 	}
+	if result.Analysis.StubbedFiles == nil {
+		t.Fatal("stubbedFiles must be present even when empty")
+	}
+	stubbed := map[int]bool{}
+	for _, fileIndex := range result.Analysis.StubbedFiles {
+		if fileIndex < 0 || fileIndex >= len(result.Files) || stubbed[fileIndex] {
+			t.Fatalf("invalid stubbed file index %d", fileIndex)
+		}
+		stubbed[fileIndex] = true
+	}
 	seen := make([]int, len(result.Files))
 	for cohortIndex, cohort := range result.Analysis.Cohorts {
 		if !document.IsLayer(cohort.Layer) {
@@ -548,10 +706,31 @@ func hostileFixturePath(t *testing.T) string {
 	return path
 }
 
+func stagedFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "staged.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func delimiterFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "delimiter.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func isolatedEnvironment(t *testing.T) []string {
 	t.Helper()
 	root := t.TempDir()
-	env := removeEnv(os.Environ(), "HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME")
+	env := removeEnv(os.Environ(),
+		"HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+		"BGR_STAGE_BUDGET", "BGR_MOCK_FAIL_SUMMARY", "BGR_MOCK_PROMPT_LOG",
+	)
 	env = append(env,
 		"HOME="+root,
 		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),

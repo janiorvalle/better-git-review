@@ -77,7 +77,7 @@ func selectNamed(name string, opts SelectOptions) (Selection, error) {
 			Model: model,
 		}, nil
 	case "mock":
-		return Selection{Provider: &Mock{}, Model: chooseModel(opts.ModelOverride, providerConfig.Model, "deterministic")}, nil
+		return Selection{Provider: &Mock{Getenv: os.Getenv}, Model: chooseModel(opts.ModelOverride, providerConfig.Model, "deterministic")}, nil
 	default:
 		return Selection{}, fmt.Errorf("unknown provider %q (supported: claude-cli, codex-cli, openrouter, mock)", name)
 	}
