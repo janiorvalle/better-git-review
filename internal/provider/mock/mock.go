@@ -1,4 +1,4 @@
-package provider
+package mock
 
 import (
 	"context"
@@ -11,22 +11,33 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/janiorvalle/better-git-review/internal/document"
 	"github.com/janiorvalle/better-git-review/internal/pathlayer"
+	"github.com/janiorvalle/better-git-review/internal/provider"
 )
 
-type Mock struct {
+type Adapter struct{}
+
+func (Adapter) Name() string {
+	return "mock"
+}
+
+func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, error) {
+	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "deterministic")
+	return &Provider{Getenv: opts.Getenv}, model, nil
+}
+
+type Provider struct {
 	Getenv func(string) string
 	mu     sync.Mutex
 }
 
-func (p *Mock) Name() string { return "mock" }
+func (p *Provider) Name() string { return "mock" }
 
-func (p *Mock) Detect() (bool, string) {
+func (p *Provider) Detect() (bool, string) {
 	return false, "mock is available only by explicit selection"
 }
 
-func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
+func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
 	if err := p.recordPrompt(prompt); err != nil {
 		return "", err
 	}
@@ -68,13 +79,13 @@ func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
 		layer := pathlayer.Classify(file.path)
 		groups[layer] = append(groups[layer], file)
 	}
-	var cohorts []document.Cohort
-	for _, layer := range document.Layers {
+	var cohorts []cohort
+	for _, layer := range layers {
 		group := groups[layer]
 		if len(group) == 0 {
 			continue
 		}
-		cohort := document.Cohort{
+		item := cohort{
 			Title:       strings.ToUpper(layer[:1]) + layer[1:] + " changes",
 			Layer:       layer,
 			Intent:      "[mock] Files grouped heuristically as " + layer + ".",
@@ -83,17 +94,22 @@ func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
 			DependsOn:   []int{},
 		}
 		for _, file := range group {
-			cohort.Files = append(cohort.Files, file.index)
-			cohort.FileSummaries = append(cohort.FileSummaries,
+			item.Files = append(item.Files, file.index)
+			item.FileSummaries = append(item.FileSummaries,
 				fmt.Sprintf("[mock] %s, +%s/-%s", file.status, file.additions, file.deletions))
 		}
-		cohorts = append(cohorts, cohort)
+		cohorts = append(cohorts, item)
 	}
 	sort.SliceStable(cohorts, func(i, j int) bool {
 		return layerPosition(cohorts[i].Layer) < layerPosition(cohorts[j].Layer)
 	})
 	diagram := "graph LR\n  A[Mock mode] --> B[No LLM analysis]"
-	analysis := document.Analysis{
+	analysis := struct {
+		Title    string   `json:"title"`
+		Overview string   `json:"overview"`
+		Mermaid  *string  `json:"mermaid"`
+		Cohorts  []cohort `json:"cohorts"`
+	}{
 		Title:    "[MOCK] Guided review",
 		Overview: "Mock analysis: files were grouped by path heuristics only.",
 		Mermaid:  &diagram,
@@ -103,14 +119,27 @@ func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
 	return string(encoded), err
 }
 
-func (p *Mock) getenv(name string) string {
+type cohort struct {
+	Title         string   `json:"title"`
+	Layer         string   `json:"layer"`
+	Intent        string   `json:"intent"`
+	Narrative     string   `json:"narrative"`
+	Files         []int    `json:"files"`
+	FileSummaries []string `json:"fileSummaries"`
+	ReviewNotes   []string `json:"reviewNotes"`
+	DependsOn     []int    `json:"dependsOn"`
+}
+
+var layers = []string{"schema", "backend", "api", "ui", "tests", "config", "docs", "other"}
+
+func (p *Provider) getenv(name string) string {
 	if p.Getenv != nil {
 		return p.Getenv(name)
 	}
 	return os.Getenv(name)
 }
 
-func (p *Mock) recordPrompt(prompt string) error {
+func (p *Provider) recordPrompt(prompt string) error {
 	path := p.getenv("BGR_MOCK_PROMPT_LOG")
 	if path == "" {
 		return nil
@@ -135,10 +164,10 @@ func mustJSON(value any) []byte {
 }
 
 func layerPosition(layer string) int {
-	for i, candidate := range document.Layers {
+	for i, candidate := range layers {
 		if layer == candidate {
 			return i
 		}
 	}
-	return len(document.Layers)
+	return len(layers)
 }

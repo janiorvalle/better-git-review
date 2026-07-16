@@ -1,11 +1,11 @@
-package provider
+package claude
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestParseClaudeOutputShapes(t *testing.T) {
+func TestParseOutputShapes(t *testing.T) {
 	tests := map[string]struct {
 		input string
 		want  string
@@ -25,7 +25,7 @@ func TestParseClaudeOutputShapes(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			got, err := ParseClaudeOutput([]byte(test.input))
+			got, err := ParseOutput([]byte(test.input))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -36,8 +36,8 @@ func TestParseClaudeOutputShapes(t *testing.T) {
 	}
 }
 
-func TestParseClaudeOutputErrorEvent(t *testing.T) {
-	_, err := ParseClaudeOutput([]byte(`[{"type":"result","is_error":true,"result":"bad auth\u001b]52;c;YQ==\u0007"}]`))
+func TestParseOutputErrorEvent(t *testing.T) {
+	_, err := ParseOutput([]byte(`[{"type":"result","is_error":true,"result":"bad auth\u001b]52;c;YQ==\u0007"}]`))
 	if err == nil {
 		t.Fatal("expected an error")
 	}

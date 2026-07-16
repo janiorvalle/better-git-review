@@ -1,4 +1,4 @@
-package provider
+package claude
 
 import (
 	"context"
@@ -6,15 +6,28 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/janiorvalle/better-git-review/internal/provider"
 )
 
-type ClaudeCLI struct {
+type Adapter struct{}
+
+func (Adapter) Name() string {
+	return "claude-cli"
+}
+
+func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, error) {
+	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "sonnet")
+	return &CLI{Model: model}, model, nil
+}
+
+type CLI struct {
 	Model string
 }
 
-func (p *ClaudeCLI) Name() string { return "claude-cli" }
+func (p *CLI) Name() string { return "claude-cli" }
 
-func (p *ClaudeCLI) Detect() (bool, string) {
+func (p *CLI) Detect() (bool, string) {
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		return false, "claude executable not found"
@@ -22,13 +35,13 @@ func (p *ClaudeCLI) Detect() (bool, string) {
 	return true, "found " + path
 }
 
-func (p *ClaudeCLI) Complete(ctx context.Context, prompt string) (string, error) {
+func (p *CLI) Complete(ctx context.Context, prompt string) (string, error) {
 	isolatedDir, err := os.MkdirTemp("", "better-git-review-claude-*")
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(isolatedDir)
-	output, err := runCommand(ctx, isolatedDir, []byte(prompt), "claude",
+	output, err := provider.RunCommand(ctx, isolatedDir, []byte(prompt), "claude",
 		"-p",
 		"--safe-mode",
 		"--tools", "",
@@ -39,10 +52,10 @@ func (p *ClaudeCLI) Complete(ctx context.Context, prompt string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	return ParseClaudeOutput(output)
+	return ParseOutput(output)
 }
 
-func ParseClaudeOutput(output []byte) (string, error) {
+func ParseOutput(output []byte) (string, error) {
 	var decoded any
 	if err := json.Unmarshal(output, &decoded); err != nil {
 		return string(output), nil
@@ -53,7 +66,7 @@ func ParseClaudeOutput(output []byte) (string, error) {
 	case map[string]any:
 		if result, ok := value["result"].(string); ok {
 			if isError, _ := value["is_error"].(bool); isError {
-				return "", fmt.Errorf("claude returned an error: %s", safeDiagnostic(result, 300))
+				return "", fmt.Errorf("claude returned an error: %s", provider.SafeDiagnostic(result, 300))
 			}
 			return result, nil
 		}
@@ -65,7 +78,7 @@ func ParseClaudeOutput(output []byte) (string, error) {
 			}
 			result, _ := object["result"].(string)
 			if isError, _ := object["is_error"].(bool); isError {
-				return "", fmt.Errorf("claude returned an error: %s", safeDiagnostic(result, 300))
+				return "", fmt.Errorf("claude returned an error: %s", provider.SafeDiagnostic(result, 300))
 			}
 			if result != "" {
 				return result, nil

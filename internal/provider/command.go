@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func runCommand(ctx context.Context, dir string, input []byte, name string, args ...string) ([]byte, error) {
+func RunCommand(ctx context.Context, dir string, input []byte, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
@@ -23,12 +23,12 @@ func runCommand(ctx context.Context, dir string, input []byte, name string, args
 		if detail == "" {
 			detail = err.Error()
 		}
-		return nil, fmt.Errorf("%s: %s", name, safeDiagnostic(detail, 1_000))
+		return nil, fmt.Errorf("%s: %s", name, SafeDiagnostic(detail, 1_000))
 	}
 	return stdout.Bytes(), nil
 }
 
-func safeDiagnostic(value string, limit int) string {
+func SafeDiagnostic(value string, limit int) string {
 	if len(value) > limit {
 		value = value[:limit] + "... [truncated]"
 	}

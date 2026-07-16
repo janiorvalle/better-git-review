@@ -75,7 +75,7 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		return err
 	}
 
-	collected, err := source.Collect(ctx, source.Options{
+	collected, err := defaultSourceRegistry().Collect(ctx, source.Options{
 		PR:       opts.PR,
 		DiffFile: opts.DiffFile,
 		Base:     opts.Base,
@@ -98,7 +98,7 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	}
 	logf(env.Stderr)("parsed %d changed file(s)", len(files))
 
-	selection, err := provider.Select(provider.SelectOptions{
+	selection, err := defaultProviderRegistry().Select(provider.SelectOptions{
 		Config:        loadedConfig.Config,
 		ModelOverride: opts.Model,
 	})

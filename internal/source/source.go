@@ -1,13 +1,9 @@
 package source
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -30,21 +26,52 @@ type Result struct {
 	Diff   []byte
 }
 
-func Collect(ctx context.Context, opts Options) (Result, error) {
+type Source interface {
+	Name() string
+	Detect(Options) (available bool, detail string)
+	Collect(context.Context, Options) (Result, error)
+}
+
+type Registry struct {
+	sources []Source
+}
+
+func NewRegistry(sources ...Source) Registry {
+	return Registry{sources: append([]Source(nil), sources...)}
+}
+
+func (r Registry) Collect(ctx context.Context, opts Options) (Result, error) {
+	if opts.Logf == nil {
+		opts.Logf = func(string, ...any) {}
+	}
 	repoDir, err := filepath.Abs(opts.RepoDir)
 	if err != nil {
 		return Result{}, err
 	}
-	if opts.Logf == nil {
-		opts.Logf = func(string, ...any) {}
+	opts.RepoDir = repoDir
+
+	var probes []string
+	for _, candidate := range r.sources {
+		available, detail := candidate.Detect(opts)
+		probes = append(probes, fmt.Sprintf("%s: %s", candidate.Name(), detail))
+		if !available {
+			continue
+		}
+		result, err := candidate.Collect(ctx, opts)
+		if err != nil {
+			return Result{}, fmt.Errorf("%s source: %w", candidate.Name(), err)
+		}
+		return result, nil
 	}
-	if opts.PR != "" {
-		return collectPR(ctx, repoDir, opts)
+	return Result{}, fmt.Errorf("no diff source available; probed %s", strings.Join(probes, "; "))
+}
+
+func (r Registry) Names() []string {
+	names := make([]string, 0, len(r.sources))
+	for _, candidate := range r.sources {
+		names = append(names, candidate.Name())
 	}
-	if opts.DiffFile != "" {
-		return collectPatch(repoDir, opts)
-	}
-	return collectGit(ctx, repoDir, opts)
+	return names
 }
 
 func RepoRoot(ctx context.Context, dir string) string {
@@ -59,157 +86,9 @@ func RepoRoot(ctx context.Context, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func collectPR(ctx context.Context, repoDir string, opts Options) (Result, error) {
-	opts.Logf("fetching PR #%s via gh ...", opts.PR)
-	metaRaw, err := run(ctx, repoDir, nil, "gh", "pr", "view", opts.PR, "--json",
-		"number,title,body,baseRefName,headRefName,url")
-	if err != nil {
-		return Result{}, fmt.Errorf("gh pr view: %w", err)
-	}
-	var meta struct {
-		Number      int    `json:"number"`
-		Title       string `json:"title"`
-		Body        string `json:"body"`
-		BaseRefName string `json:"baseRefName"`
-		HeadRefName string `json:"headRefName"`
-		URL         string `json:"url"`
-	}
-	if err := json.Unmarshal(metaRaw, &meta); err != nil {
-		return Result{}, fmt.Errorf("parse gh PR metadata: %w", err)
-	}
-	diffBytes, err := run(ctx, repoDir, nil, "gh", "pr", "diff", opts.PR, "--color", "never")
-	if err != nil {
-		return Result{}, fmt.Errorf("gh pr diff: %w", err)
-	}
-	url := meta.URL
-	return Result{
-		Diff: diffBytes,
-		Source: document.Source{
-			Title:       fmt.Sprintf("PR #%d: %s", meta.Number, meta.Title),
-			Description: meta.Body,
-			Range:       fmt.Sprintf("%s \u2190 %s", meta.BaseRefName, meta.HeadRefName),
-			URL:         &url,
-			Name:        fmt.Sprintf("pr-%d", meta.Number),
-			RepoDir:     repoDir,
-		},
-	}, nil
-}
-
-func collectPatch(repoDir string, opts Options) (Result, error) {
-	var (
-		diffBytes []byte
-		err       error
-		name      string
-		title     string
-		rangeText string
-	)
-	if opts.DiffFile == "-" {
-		opts.Logf("reading diff from stdin ...")
-		if opts.Stdin == nil {
-			opts.Stdin = os.Stdin
-		}
-		diffBytes, err = io.ReadAll(opts.Stdin)
-		name, title, rangeText = "stdin", "stdin patch", "stdin"
-	} else {
-		opts.Logf("reading diff from %s ...", opts.DiffFile)
-		diffBytes, err = os.ReadFile(opts.DiffFile)
-		base := filepath.Base(opts.DiffFile)
-		name = strings.TrimSuffix(base, filepath.Ext(base))
-		title, rangeText = base, opts.DiffFile
-	}
-	if err != nil {
-		return Result{}, fmt.Errorf("read diff %q: %w", opts.DiffFile, err)
-	}
-	return Result{
-		Diff: diffBytes,
-		Source: document.Source{
-			Title:   title,
-			Range:   rangeText,
-			Name:    sanitizeName(name),
-			RepoDir: "",
-		},
-	}, nil
-}
-
-func collectGit(ctx context.Context, repoDir string, opts Options) (Result, error) {
-	base := opts.Base
-	var err error
-	if base == "" {
-		base, err = DetectBase(ctx, repoDir)
-		if err != nil {
-			return Result{}, err
-		}
-	}
-	opts.Logf("diffing %s...HEAD in %s ...", base, repoDir)
-	diffBytes, err := (gitexec.ExecRunner{}).Run(ctx, repoDir, gitexec.DiffArgs(base+"...HEAD")...)
-	if err != nil {
-		return Result{}, fmt.Errorf("git diff %s...HEAD: %w", base, err)
-	}
-	rangeText := base + "...HEAD"
-	if len(bytes.TrimSpace(diffBytes)) == 0 {
-		opts.Logf("no committed changes vs %s; falling back to uncommitted changes (git diff HEAD)", base)
-		diffBytes, err = (gitexec.ExecRunner{}).Run(ctx, repoDir, gitexec.DiffArgs("HEAD")...)
-		if err != nil {
-			return Result{}, fmt.Errorf("git diff HEAD: %w", err)
-		}
-		rangeText = "HEAD (uncommitted)"
-	}
-	branch := "HEAD"
-	if out, branchErr := (gitexec.ExecRunner{}).Run(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD"); branchErr == nil {
-		branch = strings.TrimSpace(string(out))
-	}
-	repoName := filepath.Base(repoDir)
-	return Result{
-		Diff: diffBytes,
-		Source: document.Source{
-			Title:   fmt.Sprintf("%s: %s vs %s", repoName, branch, base),
-			Range:   rangeText,
-			Name:    sanitizeName(repoName + "-" + branch),
-			RepoDir: repoDir,
-		},
-	}, nil
-}
-
-func DetectBase(ctx context.Context, repoDir string) (string, error) {
-	if out, err := (gitexec.ExecRunner{}).Run(ctx, repoDir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
-		ref := strings.TrimSpace(string(out))
-		if ref != "" {
-			candidate := strings.TrimPrefix(ref, "refs/remotes/")
-			if _, verifyErr := (gitexec.ExecRunner{}).Run(ctx, repoDir, "rev-parse", "--verify", "--quiet", candidate); verifyErr == nil {
-				return candidate, nil
-			}
-		}
-	}
-	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		if _, err := (gitexec.ExecRunner{}).Run(ctx, repoDir, "rev-parse", "--verify", "--quiet", candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("could not auto-detect a base branch; pass --base <ref>")
-}
-
-func run(ctx context.Context, cwd string, stdin []byte, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = cwd
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail == "" {
-			detail = err.Error()
-		}
-		return nil, fmt.Errorf("%s", detail)
-	}
-	return stdout.Bytes(), nil
-}
-
 var unsafeName = regexp.MustCompile(`[^\w.-]+`)
 
-func sanitizeName(name string) string {
+func SafeName(name string) string {
 	name = strings.Trim(unsafeName.ReplaceAllString(name, "-"), "-.")
 	if name == "" {
 		return "review"

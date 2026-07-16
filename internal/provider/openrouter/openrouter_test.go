@@ -1,4 +1,4 @@
-package provider
+package openrouter
 
 import (
 	"context"
@@ -7,9 +7,21 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/janiorvalle/better-git-review/internal/provider"
 )
 
-func TestOpenRouterRejectsInBandGenerationError(t *testing.T) {
+func TestAdapterDefaultModel(t *testing.T) {
+	_, model, err := (Adapter{}).New(provider.AdapterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "anthropic/claude-sonnet-4.5" {
+		t.Fatalf("model = %q", model)
+	}
+}
+
+func TestClientRejectsInBandGenerationError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		_, _ = response.Write([]byte(`{
@@ -19,18 +31,14 @@ func TestOpenRouterRejectsInBandGenerationError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := &OpenRouter{
-		Model: "test", APIKeyEnv: "TEST_KEY", BaseURL: server.URL,
-		Getenv: func(string) string { return "secret" },
-		Client: server.Client(),
-	}
-	_, err := provider.Complete(context.Background(), "prompt")
+	client := testClient(server)
+	_, err := client.Complete(context.Background(), "prompt")
 	if err == nil || !strings.Contains(err.Error(), "provider disconnected") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestOpenRouterRejectsErrorFinishReason(t *testing.T) {
+func TestClientRejectsErrorFinishReason(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		_, _ = response.Write([]byte(`{
@@ -39,18 +47,14 @@ func TestOpenRouterRejectsErrorFinishReason(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := &OpenRouter{
-		Model: "test", APIKeyEnv: "TEST_KEY", BaseURL: server.URL,
-		Getenv: func(string) string { return "secret" },
-		Client: server.Client(),
-	}
-	_, err := provider.Complete(context.Background(), "prompt")
+	client := testClient(server)
+	_, err := client.Complete(context.Background(), "prompt")
 	if err == nil || !strings.Contains(err.Error(), "ended with an error") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestOpenRouterEscapesRemoteErrorText(t *testing.T) {
+func TestClientEscapesRemoteErrorText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		response.WriteHeader(http.StatusBadGateway)
@@ -58,12 +62,8 @@ func TestOpenRouterEscapesRemoteErrorText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := &OpenRouter{
-		Model: "test", APIKeyEnv: "TEST_KEY", BaseURL: server.URL,
-		Getenv: func(string) string { return "secret" },
-		Client: server.Client(),
-	}
-	_, err := provider.Complete(context.Background(), "prompt")
+	client := testClient(server)
+	_, err := client.Complete(context.Background(), "prompt")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -72,12 +72,12 @@ func TestOpenRouterEscapesRemoteErrorText(t *testing.T) {
 	}
 }
 
-func TestOpenRouterEscapesConfiguredEnvironmentName(t *testing.T) {
-	provider := &OpenRouter{
+func TestClientEscapesConfiguredEnvironmentName(t *testing.T) {
+	client := &Client{
 		APIKeyEnv: "KEY\x1b]52;c;YQ==\a",
 		Getenv:    func(string) string { return "" },
 	}
-	available, detail := provider.Detect()
+	available, detail := client.Detect()
 	if available {
 		t.Fatal("provider should not be available")
 	}
@@ -86,7 +86,7 @@ func TestOpenRouterEscapesConfiguredEnvironmentName(t *testing.T) {
 	}
 }
 
-func TestOpenRouterStructuredRequestRequiresSupportedParameters(t *testing.T) {
+func TestStructuredRequestRequiresSupportedParameters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		var body map[string]any
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
@@ -107,12 +107,16 @@ func TestOpenRouterStructuredRequestRequiresSupportedParameters(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := &OpenRouter{
-		Model: "test", APIKeyEnv: "TEST_KEY", BaseURL: server.URL,
-		Getenv: func(string) string { return "secret" },
-		Client: server.Client(),
-	}
-	if _, err := provider.CompleteStructured(context.Background(), "prompt", json.RawMessage(`{"type":"object"}`)); err != nil {
+	client := testClient(server)
+	if _, err := client.CompleteStructured(context.Background(), "prompt", json.RawMessage(`{"type":"object"}`)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func testClient(server *httptest.Server) *Client {
+	return &Client{
+		Model: "test", APIKeyEnv: "TEST_KEY", BaseURL: server.URL,
+		Getenv:     func(string) string { return "secret" },
+		HTTPClient: server.Client(),
 	}
 }
