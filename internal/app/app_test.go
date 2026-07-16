@@ -51,18 +51,25 @@ func TestParseArgsRejectsConflictingSources(t *testing.T) {
 func TestBrowserCommandDispatch(t *testing.T) {
 	tests := []struct {
 		goos string
+		path string
 		name string
 		args []string
 		ok   bool
 	}{
-		{goos: "darwin", name: "open", args: []string{"review.html"}, ok: true},
-		{goos: "linux", name: "xdg-open", args: []string{"review.html"}, ok: true},
-		{goos: "windows", name: "cmd", args: []string{"/c", "start", "", "review.html"}, ok: true},
-		{goos: "plan9", ok: false},
+		{goos: "darwin", path: "review.html", name: "open", args: []string{"review.html"}, ok: true},
+		{goos: "linux", path: "review.html", name: "xdg-open", args: []string{"review.html"}, ok: true},
+		{
+			goos: "windows",
+			path: `C:\reviews\change&notes.html`,
+			name: "rundll32",
+			args: []string{"url.dll,FileProtocolHandler", `C:\reviews\change&notes.html`},
+			ok:   true,
+		},
+		{goos: "plan9", path: "review.html", ok: false},
 	}
 	for _, test := range tests {
 		t.Run(test.goos, func(t *testing.T) {
-			name, args, ok := browserCommand(test.goos, "review.html")
+			name, args, ok := browserCommand(test.goos, test.path)
 			if name != test.name || !slices.Equal(args, test.args) || ok != test.ok {
 				t.Fatalf("got %q %#v %v", name, args, ok)
 			}

@@ -328,6 +328,8 @@ type ChromaTheme struct {
 	TokenCSS       template.CSS
 	LightVariables template.CSS
 	DarkVariables  template.CSS
+	LightRules     template.CSS
+	DarkRules      template.CSS
 }
 
 func ChromaThemeCSS(lightStyleName, darkStyleName string) (ChromaTheme, error) {
@@ -393,44 +395,57 @@ func buildChromaTheme(lightCSS, darkCSS string) ChromaTheme {
 	for _, selector := range selectors {
 		lightRule := lightRules[selector]
 		darkRule := darkRules[selector]
-		declarations := lightRule.declarations
-		if len(declarations) == 0 {
-			declarations = darkRule.declarations
-		}
 		hasColor := lightRule.color != "" || darkRule.color != ""
-		if !hasColor && len(declarations) == 0 {
+		if !hasColor {
 			continue
 		}
 		variable := "--chroma-" + strings.Trim(cssVarPattern.ReplaceAllString(selector, "-"), "-")
 		tokens.WriteString(selector)
 		tokens.WriteString(" {")
-		if hasColor {
-			tokens.WriteString(" color: var(")
-			tokens.WriteString(variable)
-			tokens.WriteString(");")
-			lightColor := lightRule.color
-			if lightColor == "" {
-				lightColor = lightFallback
-			}
-			darkColor := darkRule.color
-			if darkColor == "" {
-				darkColor = darkFallback
-			}
-			fmt.Fprintf(&lightVariables, " %s: %s;", variable, lightColor)
-			fmt.Fprintf(&darkVariables, " %s: %s;", variable, darkColor)
+		tokens.WriteString(" color: var(")
+		tokens.WriteString(variable)
+		tokens.WriteString(");")
+		lightColor := lightRule.color
+		if lightColor == "" {
+			lightColor = lightFallback
 		}
-		for _, declaration := range declarations {
-			tokens.WriteByte(' ')
-			tokens.WriteString(declaration)
-			tokens.WriteByte(';')
+		darkColor := darkRule.color
+		if darkColor == "" {
+			darkColor = darkFallback
 		}
+		fmt.Fprintf(&lightVariables, " %s: %s;", variable, lightColor)
+		fmt.Fprintf(&darkVariables, " %s: %s;", variable, darkColor)
 		tokens.WriteString(" }\n")
 	}
 	return ChromaTheme{
 		TokenCSS:       template.CSS(tokens.String()),
 		LightVariables: template.CSS(lightVariables.String()),
 		DarkVariables:  template.CSS(darkVariables.String()),
+		LightRules:     template.CSS(renderChromaDeclarations(lightRules)),
+		DarkRules:      template.CSS(renderChromaDeclarations(darkRules)),
 	}
+}
+
+func renderChromaDeclarations(rules map[string]chromaRule) string {
+	selectors := make([]string, 0, len(rules))
+	for selector, rule := range rules {
+		if len(rule.declarations) > 0 {
+			selectors = append(selectors, selector)
+		}
+	}
+	sort.Strings(selectors)
+	var output strings.Builder
+	for _, selector := range selectors {
+		output.WriteString(selector)
+		output.WriteString(" {")
+		for _, declaration := range rules[selector].declarations {
+			output.WriteByte(' ')
+			output.WriteString(declaration)
+			output.WriteByte(';')
+		}
+		output.WriteString(" }\n")
+	}
+	return output.String()
 }
 
 func parseChromaRules(css string) map[string]chromaRule {

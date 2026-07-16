@@ -21,7 +21,6 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/config"
 	"github.com/janiorvalle/better-git-review/internal/diff"
 	"github.com/janiorvalle/better-git-review/internal/document"
-	"github.com/janiorvalle/better-git-review/internal/fileutil"
 	"github.com/janiorvalle/better-git-review/internal/guard"
 	"github.com/janiorvalle/better-git-review/internal/provider"
 	"github.com/janiorvalle/better-git-review/internal/source"
@@ -380,7 +379,7 @@ func writeOutput(path string, content []byte) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	if err := fileutil.Replace(tempName, path); err != nil {
+	if err := os.Rename(tempName, path); err != nil {
 		return fmt.Errorf("write output %q: %w", path, err)
 	}
 	return nil
@@ -402,7 +401,7 @@ func browserCommand(goos, path string) (string, []string, bool) {
 	case "linux":
 		return "xdg-open", []string{path}, true
 	case "windows":
-		return "cmd", []string{"/c", "start", "", path}, true
+		return "rundll32", []string{"url.dll,FileProtocolHandler", path}, true
 	default:
 		return "", nil, false
 	}

@@ -130,7 +130,7 @@ func checkInternalImport(packagePath, importPath string) string {
 	case "internal/viewer":
 		return allowOnly(packagePath, importedInternal, "document")
 	case "internal/cache":
-		return allowOnly(packagePath, importedInternal, "document", "fileutil", "xdg")
+		return allowOnly(packagePath, importedInternal, "document", "xdg")
 	}
 	if strings.HasPrefix(packagePath, "internal/provider/") {
 		allowed := []string{"provider"}

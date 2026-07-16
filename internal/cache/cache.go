@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
-	"github.com/janiorvalle/better-git-review/internal/fileutil"
 	"github.com/janiorvalle/better-git-review/internal/xdg"
 )
 
@@ -94,7 +93,7 @@ func (c Cache) Store(key string, value document.Document) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	if err := fileutil.Replace(tempName, filepath.Join(c.Dir, key+".json")); err != nil {
+	if err := os.Rename(tempName, filepath.Join(c.Dir, key+".json")); err != nil {
 		return err
 	}
 	return nil

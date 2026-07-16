@@ -152,7 +152,8 @@ func TestChromaThemeUsesCompleteVariablePaletteWithoutBackgrounds(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	combined := string(theme.TokenCSS) + string(theme.LightVariables) + string(theme.DarkVariables)
+	combined := string(theme.TokenCSS) + string(theme.LightVariables) + string(theme.DarkVariables) +
+		string(theme.LightRules) + string(theme.DarkRules)
 	if strings.Contains(combined, "background") {
 		t.Fatalf("generated Chroma theme still sets backgrounds:\n%s", combined)
 	}
@@ -171,5 +172,11 @@ func TestChromaThemeUsesCompleteVariablePaletteWithoutBackgrounds(t *testing.T) 
 	}
 	if !strings.Contains(string(theme.DarkVariables), "#e6edf3") {
 		t.Fatal("dark palette does not carry the GitHub-dark foreground fallback")
+	}
+	if strings.Contains(string(theme.LightRules), ".chroma .c {") {
+		t.Fatal("dark-only comment typography leaked into the light theme")
+	}
+	if !strings.Contains(string(theme.DarkRules), ".chroma .c { font-style: italic; }") {
+		t.Fatal("dark comment typography is missing from the dark theme")
 	}
 }
