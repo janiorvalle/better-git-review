@@ -5,9 +5,10 @@ Adapted from drawover's `SETUP-GITHUB.local.md`. Everything in-code
 already landed in Gate M4.
 
 **Owner decision (2026-07-16): these settings are applied via Terraform,
-not by hand.** A separate PRIVATE repo (working name
-`janiorvalle/github-baseline`) holds an `oss-baseline` module using the
-GitHub provider, instantiated for `better-git-review` AND `drawoverlay`
+not by hand.** A separate PRIVATE repo — `janiorvalle/oss-baseline`
+(created; remote `https://github.com/janiorvalle/oss-baseline.git`) —
+holds the baseline module using the GitHub provider, instantiated for
+`better-git-review` AND `drawoverlay`
 (imported, so the module is validated against the already-trusted repo).
 Fine-grained admin PAT via env var only; gitignored local state
 (recoverable via import); scheduled `terraform plan` as drift detection.
