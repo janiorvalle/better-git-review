@@ -1,6 +1,7 @@
 package viewer
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -143,5 +144,29 @@ func TestHighlightKnownAndUnknownExtensions(t *testing.T) {
 	unknown := newHighlighter("file.unknownextension").highlight("plain < text", nil)
 	if string(unknown) != "plain &lt; text" {
 		t.Fatalf("unknown extension should be escaped plain text: %s", unknown)
+	}
+}
+
+func TestChromaThemeUsesCompleteVariablePaletteWithoutBackgrounds(t *testing.T) {
+	theme, err := ChromaThemeCSS("github", "github-dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := string(theme.TokenCSS) + string(theme.LightVariables) + string(theme.DarkVariables)
+	if strings.Contains(combined, "background") {
+		t.Fatalf("generated Chroma theme still sets backgrounds:\n%s", combined)
+	}
+	variablePattern := regexp.MustCompile(`var\((--chroma-[^)]+)\)`)
+	for _, match := range variablePattern.FindAllStringSubmatch(string(theme.TokenCSS), -1) {
+		variable := match[1] + ":"
+		if !strings.Contains(string(theme.LightVariables), variable) {
+			t.Errorf("light palette does not define %s", match[1])
+		}
+		if !strings.Contains(string(theme.DarkVariables), variable) {
+			t.Errorf("dark palette does not define %s", match[1])
+		}
+	}
+	if !strings.Contains(string(theme.DarkVariables), "#e6edf3") {
+		t.Fatal("dark palette does not carry the GitHub-dark foreground fallback")
 	}
 }

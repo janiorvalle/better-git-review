@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
@@ -322,7 +324,25 @@ func (h *syntaxHighlighter) highlightPart(text string) string {
 	return strings.TrimSuffix(output.String(), "\n")
 }
 
-func ChromaCSS(styleName string) (template.CSS, error) {
+type ChromaTheme struct {
+	TokenCSS       template.CSS
+	LightVariables template.CSS
+	DarkVariables  template.CSS
+}
+
+func ChromaThemeCSS(lightStyleName, darkStyleName string) (ChromaTheme, error) {
+	lightCSS, err := chromaCSS(lightStyleName)
+	if err != nil {
+		return ChromaTheme{}, err
+	}
+	darkCSS, err := chromaCSS(darkStyleName)
+	if err != nil {
+		return ChromaTheme{}, err
+	}
+	return buildChromaTheme(lightCSS, darkCSS), nil
+}
+
+func chromaCSS(styleName string) (string, error) {
 	style := styles.Get(styleName)
 	if style == nil {
 		return "", fmt.Errorf("chroma style %q not found", styleName)
@@ -332,5 +352,105 @@ func ChromaCSS(styleName string) (template.CSS, error) {
 	if err := formatter.WriteCSS(&output, style); err != nil {
 		return "", err
 	}
-	return template.CSS(output.String()), nil
+	return output.String(), nil
+}
+
+type chromaRule struct {
+	color        string
+	declarations []string
+}
+
+var (
+	cssRulePattern = regexp.MustCompile(`(?s)([^{}]+)\{([^{}]*)\}`)
+	cssVarPattern  = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+)
+
+func buildChromaTheme(lightCSS, darkCSS string) ChromaTheme {
+	lightRules := parseChromaRules(lightCSS)
+	darkRules := parseChromaRules(darkCSS)
+	selectors := make([]string, 0, len(lightRules)+len(darkRules))
+	seen := map[string]bool{}
+	for selector := range lightRules {
+		seen[selector] = true
+		selectors = append(selectors, selector)
+	}
+	for selector := range darkRules {
+		if !seen[selector] {
+			selectors = append(selectors, selector)
+		}
+	}
+	sort.Strings(selectors)
+
+	lightFallback := lightRules[".chroma"].color
+	darkFallback := darkRules[".chroma"].color
+	var tokens, lightVariables, darkVariables strings.Builder
+	for _, selector := range selectors {
+		lightRule := lightRules[selector]
+		darkRule := darkRules[selector]
+		declarations := lightRule.declarations
+		if len(declarations) == 0 {
+			declarations = darkRule.declarations
+		}
+		hasColor := lightRule.color != "" || darkRule.color != ""
+		if !hasColor && len(declarations) == 0 {
+			continue
+		}
+		variable := "--chroma-" + strings.Trim(cssVarPattern.ReplaceAllString(selector, "-"), "-")
+		tokens.WriteString(selector)
+		tokens.WriteString(" {")
+		if hasColor {
+			tokens.WriteString(" color: var(")
+			tokens.WriteString(variable)
+			tokens.WriteString(");")
+			lightColor := lightRule.color
+			if lightColor == "" {
+				lightColor = lightFallback
+			}
+			darkColor := darkRule.color
+			if darkColor == "" {
+				darkColor = darkFallback
+			}
+			fmt.Fprintf(&lightVariables, " %s: %s;", variable, lightColor)
+			fmt.Fprintf(&darkVariables, " %s: %s;", variable, darkColor)
+		}
+		for _, declaration := range declarations {
+			tokens.WriteByte(' ')
+			tokens.WriteString(declaration)
+			tokens.WriteByte(';')
+		}
+		tokens.WriteString(" }\n")
+	}
+	return ChromaTheme{
+		TokenCSS:       template.CSS(tokens.String()),
+		LightVariables: template.CSS(lightVariables.String()),
+		DarkVariables:  template.CSS(darkVariables.String()),
+	}
+}
+
+func parseChromaRules(css string) map[string]chromaRule {
+	rules := map[string]chromaRule{}
+	for _, match := range cssRulePattern.FindAllStringSubmatch(css, -1) {
+		selector := strings.TrimSpace(match[1])
+		rule := chromaRule{}
+		for _, rawDeclaration := range strings.Split(match[2], ";") {
+			name, value, ok := strings.Cut(rawDeclaration, ":")
+			if !ok {
+				continue
+			}
+			name = strings.TrimSpace(name)
+			value = strings.TrimSpace(value)
+			switch name {
+			case "background", "background-color":
+				continue
+			case "color":
+				rule.color = value
+			default:
+				if name != "" && value != "" {
+					rule.declarations = append(rule.declarations, name+": "+value)
+				}
+			}
+		}
+		rules[selector] = rule
+	}
+	return rules
 }
