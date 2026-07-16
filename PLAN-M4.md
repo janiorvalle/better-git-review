@@ -230,6 +230,16 @@ CodeRabbit reference — stronger diff color presence with left-edge accents,
 vivid syntax palette on dark, tighter file chrome, the overall "guided
 review tool" feel rather than "rendered document."
 
+**Claude lane also owns docs voice** *(owner decision, 2026-07-16)*:
+33. **Docs voice pass.** All public-facing markdown (README, CONTRIBUTING,
+    SECURITY.md, release-note templates, and any docs/ added by M4) rewritten
+    in the owner's voice via the `janior-voice` skill, modeled on the
+    drawover repo's docs — less AI-ish, same substance. Part of the M4
+    timeframe but sequenced AFTER the Codex M4 merge (M4 changes README
+    content — bgr-primary, Windows, CLA — so the voice pass lands on final
+    content, not churn). Internal working docs (PLAN*.md, handoffs/) stay
+    as-is; they're process artifacts, not the public face.
+
 **Boundary between the lanes:**
 - *Claude (design lane):* everything inside `internal/viewer/template.html`'s
   CSS + markup structure and the visual parts of `viewer/*.go` rendering
