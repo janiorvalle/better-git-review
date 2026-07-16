@@ -92,8 +92,14 @@ func (p *OpenRouter) complete(ctx context.Context, prompt string, schema json.Ra
 		return nil, fmt.Errorf("openrouter returned %s: %.500s", response.Status, body)
 	}
 	var decoded struct {
+		Error *struct {
+			Code     json.RawMessage        `json:"code"`
+			Message  string                 `json:"message"`
+			Metadata map[string]interface{} `json:"metadata"`
+		} `json:"error"`
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content json.RawMessage `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -101,8 +107,14 @@ func (p *OpenRouter) complete(ctx context.Context, prompt string, schema json.Ra
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return nil, fmt.Errorf("parse openrouter response: %w", err)
 	}
+	if decoded.Error != nil {
+		return nil, fmt.Errorf("openrouter generation error: %s", decoded.Error.Message)
+	}
 	if len(decoded.Choices) == 0 {
 		return nil, fmt.Errorf("openrouter response contained no choices")
+	}
+	if decoded.Choices[0].FinishReason == "error" {
+		return nil, fmt.Errorf("openrouter generation ended with an error")
 	}
 	content := decoded.Choices[0].Message.Content
 	var contentString string

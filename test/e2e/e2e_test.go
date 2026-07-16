@@ -368,6 +368,8 @@ func initializeRepo(t *testing.T) string {
 	runGit(t, repo, "init", "-b", "main")
 	runGit(t, repo, "config", "user.email", "e2e@example.com")
 	runGit(t, repo, "config", "user.name", "E2E")
+	runGit(t, repo, "config", "color.ui", "always")
+	runGit(t, repo, "config", "diff.mnemonicPrefix", "true")
 	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -140,14 +140,14 @@ func collectGit(ctx context.Context, repoDir string, opts Options) (Result, erro
 		}
 	}
 	opts.Logf("diffing %s...HEAD in %s ...", base, repoDir)
-	diffBytes, err := run(ctx, repoDir, nil, "git", "diff", base+"...HEAD")
+	diffBytes, err := run(ctx, repoDir, nil, "git", gitDiffArgs(base+"...HEAD")...)
 	if err != nil {
 		return Result{}, fmt.Errorf("git diff %s...HEAD: %w", base, err)
 	}
 	rangeText := base + "...HEAD"
 	if len(bytes.TrimSpace(diffBytes)) == 0 {
 		opts.Logf("no committed changes vs %s; falling back to uncommitted changes (git diff HEAD)", base)
-		diffBytes, err = run(ctx, repoDir, nil, "git", "diff", "HEAD")
+		diffBytes, err = run(ctx, repoDir, nil, "git", gitDiffArgs("HEAD")...)
 		if err != nil {
 			return Result{}, fmt.Errorf("git diff HEAD: %w", err)
 		}
@@ -201,6 +201,20 @@ func run(ctx context.Context, cwd string, stdin []byte, name string, args ...str
 		return nil, fmt.Errorf("%s", detail)
 	}
 	return stdout.Bytes(), nil
+}
+
+func gitDiffArgs(target string) []string {
+	return []string{
+		"-c", "color.ui=false",
+		"-c", "diff.mnemonicPrefix=false",
+		"diff",
+		"--no-ext-diff",
+		"--no-textconv",
+		"--no-color",
+		"--src-prefix=a/",
+		"--dst-prefix=b/",
+		target,
+	}
 }
 
 var unsafeName = regexp.MustCompile(`[^\w.-]+`)
