@@ -131,6 +131,10 @@ func TestStdin(t *testing.T) {
 func TestGitSources(t *testing.T) {
 	t.Run("branch diff", func(t *testing.T) {
 		repo := initializeRepo(t)
+		subdir := filepath.Join(repo, "nested")
+		if err := os.Mkdir(subdir, 0o700); err != nil {
+			t.Fatal(err)
+		}
 		runGit(t, repo, "switch", "-c", "feature")
 		if err := os.WriteFile(filepath.Join(repo, "feature.go"), []byte("package sample\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -140,7 +144,7 @@ func TestGitSources(t *testing.T) {
 
 		output := filepath.Join(t.TempDir(), "branch.json")
 		result := runCLI(t, isolatedEnvironment(t), nil,
-			"-C", repo, "--base", "main", "--provider", "mock", "--out", output)
+			"-C", subdir, "--base", "main", "--provider", "mock", "--out", output)
 		if result.err != nil {
 			t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
 		}
@@ -148,14 +152,18 @@ func TestGitSources(t *testing.T) {
 		if len(doc.Files) != 1 || doc.Files[0].Path != "feature.go" {
 			t.Fatalf("unexpected files: %#v", doc.Files)
 		}
+		canonicalRepo, err := filepath.EvalSymlinks(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Source.RepoDir != canonicalRepo {
+			t.Fatalf("repoDir = %q, want %q", doc.Source.RepoDir, canonicalRepo)
+		}
 	})
 
 	t.Run("uncommitted fallback", func(t *testing.T) {
 		repo := initializeRepo(t)
-		if err := os.WriteFile(filepath.Join(repo, "untracked.go"), []byte("package sample\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(repo, "empty.txt"), nil, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("changed\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		output := filepath.Join(t.TempDir(), "working-tree.json")
@@ -168,13 +176,8 @@ func TestGitSources(t *testing.T) {
 		if doc.Source.Range != "HEAD (uncommitted)" {
 			t.Fatalf("range = %q", doc.Source.Range)
 		}
-		paths := make([]string, 0, len(doc.Files))
-		for _, file := range doc.Files {
-			paths = append(paths, file.Path)
-		}
-		slices.Sort(paths)
-		if len(doc.Files) != 2 || !slices.Equal(paths, []string{"empty.txt", "untracked.go"}) {
-			t.Fatalf("untracked file was not collected: %#v", doc.Files)
+		if len(doc.Files) != 1 || doc.Files[0].Path != "base.txt" {
+			t.Fatalf("working-tree change was not collected: %#v", doc.Files)
 		}
 		if !strings.Contains(result.stderr, "falling back to uncommitted changes") {
 			t.Fatalf("fallback was not logged: %s", result.stderr)

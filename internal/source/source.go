@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
@@ -153,16 +151,6 @@ func collectGit(ctx context.Context, repoDir string, opts Options) (Result, erro
 		if err != nil {
 			return Result{}, fmt.Errorf("git diff HEAD: %w", err)
 		}
-		untracked, untrackedErr := collectUntracked(ctx, repoDir)
-		if untrackedErr != nil {
-			return Result{}, untrackedErr
-		}
-		if len(untracked) > 0 {
-			if len(diffBytes) > 0 && diffBytes[len(diffBytes)-1] != '\n' {
-				diffBytes = append(diffBytes, '\n')
-			}
-			diffBytes = append(diffBytes, untracked...)
-		}
 		rangeText = "HEAD (uncommitted)"
 	}
 	branch := "HEAD"
@@ -197,17 +185,6 @@ func DetectBase(ctx context.Context, repoDir string) (string, error) {
 }
 
 func run(ctx context.Context, cwd string, stdin []byte, name string, args ...string) ([]byte, error) {
-	return runWithExitCodes(ctx, cwd, stdin, []int{0}, name, args...)
-}
-
-func runWithExitCodes(
-	ctx context.Context,
-	cwd string,
-	stdin []byte,
-	allowedExitCodes []int,
-	name string,
-	args ...string,
-) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = cwd
 	if stdin != nil {
@@ -217,14 +194,6 @@ func runWithExitCodes(
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			for _, allowed := range allowedExitCodes {
-				if exitErr.ExitCode() == allowed {
-					return stdout.Bytes(), nil
-				}
-			}
-		}
 		detail := strings.TrimSpace(stderr.String())
 		if detail == "" {
 			detail = err.Error()
@@ -232,63 +201,6 @@ func runWithExitCodes(
 		return nil, fmt.Errorf("%s", detail)
 	}
 	return stdout.Bytes(), nil
-}
-
-func collectUntracked(ctx context.Context, repoDir string) ([]byte, error) {
-	rawPaths, err := run(ctx, repoDir, nil, "git", "ls-files", "--others", "--exclude-standard", "-z")
-	if err != nil {
-		return nil, fmt.Errorf("list untracked files: %w", err)
-	}
-	var output bytes.Buffer
-	for _, rawPath := range bytes.Split(rawPaths, []byte{0}) {
-		if len(rawPath) == 0 {
-			continue
-		}
-		path := string(rawPath)
-		patch, diffErr := runWithExitCodes(
-			ctx, repoDir, nil, []int{0, 1},
-			"git", "diff", "--no-index", "--", "/dev/null", path,
-		)
-		if diffErr != nil {
-			return nil, fmt.Errorf("diff untracked file %q: %w", path, diffErr)
-		}
-		if len(patch) == 0 {
-			patch, diffErr = emptyFilePatch(repoDir, path)
-			if diffErr != nil {
-				return nil, diffErr
-			}
-		}
-		output.Write(patch)
-		if len(patch) > 0 && patch[len(patch)-1] != '\n' {
-			output.WriteByte('\n')
-		}
-	}
-	return output.Bytes(), nil
-}
-
-func emptyFilePatch(repoDir, path string) ([]byte, error) {
-	info, err := os.Lstat(filepath.Join(repoDir, filepath.FromSlash(path)))
-	if err != nil {
-		return nil, fmt.Errorf("inspect untracked file %q: %w", path, err)
-	}
-	mode := "100644"
-	if info.Mode()&0o111 != 0 {
-		mode = "100755"
-	}
-	oldPath := gitPatchPath("a", path)
-	newPath := gitPatchPath("b", path)
-	return []byte(fmt.Sprintf(
-		"diff --git %s %s\nnew file mode %s\nindex 0000000..e69de29\n--- /dev/null\n+++ %s\n",
-		oldPath, newPath, mode, newPath,
-	)), nil
-}
-
-func gitPatchPath(side, path string) string {
-	fullPath := side + "/" + path
-	if strings.ContainsAny(fullPath, "\t\n\"\\") {
-		return strconv.Quote(fullPath)
-	}
-	return fullPath
 }
 
 var unsafeName = regexp.MustCompile(`[^\w.-]+`)

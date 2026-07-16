@@ -68,7 +68,7 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		PR:       opts.PR,
 		DiffFile: opts.DiffFile,
 		Base:     opts.Base,
-		RepoDir:  opts.RepoDir,
+		RepoDir:  repoRoot,
 		Stdin:    env.Stdin,
 		Logf:     logf(env.Stderr),
 	})
