@@ -173,7 +173,10 @@ func DetectBase(ctx context.Context, repoDir string) (string, error) {
 	if out, err := run(ctx, repoDir, nil, "git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
 		ref := strings.TrimSpace(string(out))
 		if ref != "" {
-			return strings.TrimPrefix(ref, "refs/remotes/"), nil
+			candidate := strings.TrimPrefix(ref, "refs/remotes/")
+			if _, verifyErr := run(ctx, repoDir, nil, "git", "rev-parse", "--verify", "--quiet", candidate); verifyErr == nil {
+				return candidate, nil
+			}
 		}
 	}
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {

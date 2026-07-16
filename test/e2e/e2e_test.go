@@ -82,7 +82,7 @@ func TestCache(t *testing.T) {
 	}
 }
 
-func TestCacheRejectsChangedSourceContext(t *testing.T) {
+func TestCacheReusesIdenticalDiffWithCurrentSourceMetadata(t *testing.T) {
 	env := isolatedEnvironment(t)
 	temp := t.TempDir()
 	firstPatch := filepath.Join(temp, "first.patch")
@@ -108,8 +108,8 @@ func TestCacheRejectsChangedSourceContext(t *testing.T) {
 		t.Fatalf("second command failed: %v\n%s", second.err, second.stderr)
 	}
 	doc := readAndValidate(t, secondOutput)
-	if doc.Meta.Cached || strings.Contains(second.stderr, "cache hit") {
-		t.Fatalf("changed source context reused stale analysis: %#v\n%s", doc.Meta, second.stderr)
+	if !doc.Meta.Cached || !strings.Contains(second.stderr, "cache hit") {
+		t.Fatalf("identical diff did not reuse cache: %#v\n%s", doc.Meta, second.stderr)
 	}
 	if doc.Source.Title != "second.patch" {
 		t.Fatalf("source title = %q", doc.Source.Title)
