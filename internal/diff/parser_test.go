@@ -3,6 +3,7 @@ package diff
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -75,5 +76,23 @@ func TestParseRejectsMalformedDiffHeader(t *testing.T) {
 	_, err := Parse("diff --git only-one-path\n")
 	if err == nil {
 		t.Fatal("expected an error")
+	}
+}
+
+func TestParseCRLFPatch(t *testing.T) {
+	patch := strings.ReplaceAll(`diff --git a/a.txt b/a.txt
+index 1111111..2222222 100644
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-old
++new
+`, "\n", "\r\n")
+	files, err := Parse(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "a.txt" || files[0].Hunks[0].Lines[1].Text != "new" {
+		t.Fatalf("CRLF patch was corrupted: %#v", files)
 	}
 }

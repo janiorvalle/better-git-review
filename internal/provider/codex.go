@@ -37,28 +37,25 @@ func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) 
 	}
 	defer os.Remove(outputPath)
 
-	// The diff is already in the prompt, so the agent gets no host-reading,
-	// connector, subagent, image, or web tools.
 	args := []string{
 		"exec",
 		"--ephemeral",
 		"--ignore-user-config",
 		"--ignore-rules",
-		"--disable", "apps",
-		"--disable", "goals",
-		"--disable", "hooks",
-		"--disable", "multi_agent",
-		"--disable", "remote_plugin",
-		"--disable", "shell_snapshot",
-		"--disable", "shell_tool",
-		"--disable", "unified_exec",
+	}
+	// The diff is already in the prompt, so the agent gets no host-reading,
+	// connector, plugin, browser, computer-use, image, subagent, or web tools.
+	for _, feature := range disabledCodexFeatures {
+		args = append(args, "--disable", feature)
+	}
+	args = append(args,
 		"--config", `web_search="disabled"`,
 		"--config", "tools_view_image=false",
 		"--skip-git-repo-check",
 		"--sandbox", "read-only",
 		"--output-last-message", outputPath,
 		"-C", isolatedDir,
-	}
+	)
 	if p.Model != "" && p.Model != "default" {
 		args = append(args, "--model", p.Model)
 	}
@@ -71,4 +68,34 @@ func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) 
 		return "", fmt.Errorf("read codex last message: %w", err)
 	}
 	return string(output), nil
+}
+
+var disabledCodexFeatures = []string{
+	"apps",
+	"auth_elicitation",
+	"browser_use",
+	"browser_use_external",
+	"browser_use_full_cdp_access",
+	"code_mode",
+	"code_mode_host",
+	"computer_use",
+	"enable_mcp_apps",
+	"goals",
+	"hooks",
+	"image_generation",
+	"in_app_browser",
+	"multi_agent",
+	"network_proxy",
+	"plugin_sharing",
+	"plugins",
+	"remote_plugin",
+	"request_permissions_tool",
+	"shell_snapshot",
+	"shell_tool",
+	"skill_mcp_dependency_install",
+	"standalone_web_search",
+	"tool_call_mcp_elicitation",
+	"tool_suggest",
+	"unified_exec",
+	"workspace_dependencies",
 }

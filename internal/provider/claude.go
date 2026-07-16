@@ -53,7 +53,7 @@ func ParseClaudeOutput(output []byte) (string, error) {
 	case map[string]any:
 		if result, ok := value["result"].(string); ok {
 			if isError, _ := value["is_error"].(bool); isError {
-				return "", fmt.Errorf("claude returned an error: %.300s", result)
+				return "", fmt.Errorf("claude returned an error: %s", safeDiagnostic(result, 300))
 			}
 			return result, nil
 		}
@@ -65,7 +65,7 @@ func ParseClaudeOutput(output []byte) (string, error) {
 			}
 			result, _ := object["result"].(string)
 			if isError, _ := object["is_error"].(bool); isError {
-				return "", fmt.Errorf("claude returned an error: %.300s", result)
+				return "", fmt.Errorf("claude returned an error: %s", safeDiagnostic(result, 300))
 			}
 			if result != "" {
 				return result, nil

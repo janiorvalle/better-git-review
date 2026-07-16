@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseClaudeOutputShapes(t *testing.T) {
 	tests := map[string]struct {
@@ -34,8 +37,11 @@ func TestParseClaudeOutputShapes(t *testing.T) {
 }
 
 func TestParseClaudeOutputErrorEvent(t *testing.T) {
-	_, err := ParseClaudeOutput([]byte(`[{"type":"result","is_error":true,"result":"bad auth"}]`))
+	_, err := ParseClaudeOutput([]byte(`[{"type":"result","is_error":true,"result":"bad auth\u001b]52;c;YQ==\u0007"}]`))
 	if err == nil {
 		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "\x1b") || !strings.Contains(err.Error(), `\x1b`) {
+		t.Fatalf("provider control characters were not escaped: %q", err)
 	}
 }

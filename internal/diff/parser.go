@@ -24,6 +24,7 @@ func Parse(text string) ([]document.File, error) {
 	}
 
 	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if strings.HasPrefix(line, "diff --git ") {
 			oldPath, newPath, err := parseDiffHeader(strings.TrimPrefix(line, "diff --git "))
 			if err != nil {
