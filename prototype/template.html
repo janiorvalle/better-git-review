@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ — walkthrough</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --panel: #ffffff; --text: #1a1d21; --muted: #6b7280;
+    --border: #e3e5e8; --accent: #4f46e5; --accent-soft: #eef0ff;
+    --add-bg: #e6ffec; --add-num: #ccffd8; --del-bg: #ffebe9; --del-num: #ffd7d5;
+    --code-bg: #fafbfc; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101216; --panel: #181b20; --text: #e6e8eb; --muted: #9aa1ab;
+      --border: #2a2e35; --accent: #818cf8; --accent-soft: #23263a;
+      --add-bg: #12261e; --add-num: #1a3a2a; --del-bg: #2d1a1c; --del-num: #45242a;
+      --code-bg: #14171c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  .layout { display: flex; min-height: 100vh; }
+
+  nav { width: 290px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--panel); padding: 20px 14px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  nav h1 { font-size: 15px; margin: 0 0 4px; line-height: 1.35; }
+  nav .range { font-size: 12px; color: var(--muted); font-family: var(--mono); margin-bottom: 16px; word-break: break-all; }
+  .step-link { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13.5px; margin-bottom: 2px; border: 1px solid transparent; }
+  .step-link:hover { background: var(--bg); }
+  .step-link.active { background: var(--accent-soft); border-color: var(--accent); }
+  .step-link .num { color: var(--muted); font-size: 12px; font-family: var(--mono); min-width: 14px; }
+  .badge { display: inline-block; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: 99px; margin-left: 6px; vertical-align: 1px; }
+  .badge.schema { background:#fef3c7; color:#92400e; } .badge.backend { background:#dbeafe; color:#1e40af; }
+  .badge.api { background:#ede9fe; color:#5b21b6; } .badge.ui { background:#fce7f3; color:#9d174d; }
+  .badge.tests { background:#d1fae5; color:#065f46; } .badge.config { background:#e5e7eb; color:#374151; }
+  .badge.docs { background:#e0f2fe; color:#075985; } .badge.other { background:#e5e7eb; color:#374151; }
+  @media (prefers-color-scheme: dark) {
+    .badge.schema { background:#3a2f10; color:#fcd34d; } .badge.backend { background:#172a4a; color:#93c5fd; }
+    .badge.api { background:#2b2150; color:#c4b5fd; } .badge.ui { background:#40182b; color:#f9a8d4; }
+    .badge.tests { background:#0f2f24; color:#6ee7b7; } .badge.config, .badge.other { background:#2a2e35; color:#c3c8cf; }
+    .badge.docs { background:#0f2a3a; color:#7dd3fc; }
+  }
+
+  main { flex: 1; min-width: 0; padding: 28px 36px 80px; max-width: 1100px; }
+  .step { display: none; }
+  .step.active { display: block; }
+  .step h2 { font-size: 22px; margin: 0 0 2px; }
+  .step .intent { color: var(--muted); font-size: 15px; margin: 0 0 18px; }
+  .narrative { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; }
+  .review-notes { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 18px 12px 16px; margin-bottom: 20px; }
+  .review-notes h4 { margin: 2px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .review-notes ul { margin: 0; padding-left: 20px; }
+  .review-notes li { margin: 3px 0; }
+
+  .file { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
+  .file-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; user-select: none; }
+  .file-head:hover { background: var(--bg); }
+  .file-head .chev { color: var(--muted); font-size: 11px; transition: transform .15s; }
+  .file.collapsed .chev { transform: rotate(-90deg); }
+  .file-head .path { font-family: var(--mono); font-size: 13px; font-weight: 600; word-break: break-all; }
+  .file-head .stat { margin-left: auto; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  .stat .plus { color: #1a7f37; } .stat .minus { color: #cf222e; }
+  .file-summary { padding: 0 14px 10px; color: var(--muted); font-size: 13.5px; }
+  .file.collapsed .diff, .file.collapsed .file-summary { display: none; }
+  .status-tag { font-size: 11px; padding: 1px 7px; border-radius: 5px; border: 1px solid var(--border); color: var(--muted); }
+
+  .diff { border-top: 1px solid var(--border); overflow-x: auto; background: var(--code-bg); }
+  .diff table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; }
+  .diff td { padding: 0 10px; white-space: pre; }
+  .diff .ln { width: 1%; min-width: 42px; text-align: right; color: var(--muted); user-select: none; font-size: 11.5px; border-right: 1px solid var(--border); }
+  .diff tr.a { background: var(--add-bg); } .diff tr.a .ln { background: var(--add-num); }
+  .diff tr.d { background: var(--del-bg); } .diff tr.d .ln { background: var(--del-num); }
+  .diff tr.hunk td { background: var(--accent-soft); color: var(--muted); font-size: 11.5px; padding: 3px 10px; }
+
+  .overview-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 22px; margin-bottom: 20px; }
+  .mermaid-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 20px; text-align: center; overflow-x: auto; }
+  .toc { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+  .toc li { padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; cursor: pointer; }
+  .toc li:hover { border-color: var(--accent); }
+  .toc .t { font-weight: 600; }
+  .toc .i { color: var(--muted); font-size: 13.5px; }
+
+  .pager { display: flex; justify-content: space-between; margin-top: 28px; gap: 12px; }
+  .pager button { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 10px 18px; border-radius: 9px; font-size: 14px; cursor: pointer; max-width: 48%; text-align: left; }
+  .pager button:hover:not(:disabled) { border-color: var(--accent); }
+  .pager button:disabled { opacity: .35; cursor: default; }
+  .pager .dir { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); display: block; }
+  .kbd-hint { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+  kbd { border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-family: var(--mono); font-size: 11px; background: var(--panel); }
+  @media (max-width: 800px) { nav { display: none; } main { padding: 18px; } }
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav id="nav"></nav>
+  <main id="main"></main>
+</div>
+<script id="data" type="application/json">"__DATA__"</script>
+<script>
+const DATA = JSON.parse(document.getElementById('data').textContent);
+const { files, analysis, source } = DATA;
+const steps = [{ kind: 'overview' }, ...analysis.cohorts.map(c => ({ kind: 'cohort', c }))];
+let current = 0;
+
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function renderNav() {
+  const nav = document.getElementById('nav');
+  nav.innerHTML = `<h1>${esc(analysis.title || source.title)}</h1>
+    <div class="range">${esc(source.range)}${source.url ? ` · <a href="${esc(source.url)}" target="_blank">PR ↗</a>` : ''}</div>`
+    + steps.map((s, i) => {
+      const label = s.kind === 'overview' ? 'Overview'
+        : `${esc(s.c.title)}<span class="badge ${s.c.layer}">${s.c.layer}</span>`;
+      return `<div class="step-link${i===current?' active':''}" onclick="go(${i})">
+        <span class="num">${i === 0 ? '◈' : i}</span><span>${label}</span></div>`;
+    }).join('');
+}
+
+function statHtml(f) {
+  return `<span class="stat"><span class="plus">+${f.additions}</span> <span class="minus">−${f.deletions}</span></span>`;
+}
+
+function diffHtml(f) {
+  if (f.binary) return '<div class="file-summary">(binary file)</div>';
+  let rows = '';
+  for (const h of f.hunks) {
+    rows += `<tr class="hunk"><td class="ln"></td><td class="ln"></td><td>@@ ${esc(h.header)}</td></tr>`;
+    for (const l of h.lines) {
+      rows += `<tr class="${l.t}"><td class="ln">${l.n[0] ?? ''}</td><td class="ln">${l.n[1] ?? ''}</td><td>${esc(l.s)}</td></tr>`;
+    }
+  }
+  return `<div class="diff"><table>${rows}</table></div>`;
+}
+
+function fileHtml(idx, summary, collapsed) {
+  const f = files[idx];
+  return `<div class="file${collapsed ? ' collapsed' : ''}">
+    <div class="file-head" onclick="this.parentElement.classList.toggle('collapsed')">
+      <span class="chev">▼</span>
+      <span class="path">${esc(f.path)}</span>
+      ${f.status !== 'modified' ? `<span class="status-tag">${f.status}</span>` : ''}
+      ${statHtml(f)}
+    </div>
+    ${summary ? `<div class="file-summary">${esc(summary)}</div>` : ''}
+    ${diffHtml(f)}
+  </div>`;
+}
+
+function overviewHtml() {
+  const total = files.reduce((a, f) => ({ add: a.add + f.additions, del: a.del + f.deletions }), { add: 0, del: 0 });
+  return `<h2>${esc(analysis.title || source.title)}</h2>
+    <p class="intent">${files.length} files · <span class="stat"><span class="plus">+${total.add}</span> <span class="minus">−${total.del}</span></span></p>
+    <div class="overview-card">${esc(analysis.overview)}</div>
+    ${analysis.mermaid ? `<div class="mermaid-box"><pre class="mermaid">${esc(analysis.mermaid)}</pre></div>` : ''}
+    <ol class="toc">${analysis.cohorts.map((c, i) => `<li onclick="go(${i+1})">
+      <span class="t">${i+1}. ${esc(c.title)}</span><span class="badge ${c.layer}">${c.layer}</span>
+      <div class="i">${esc(c.intent)} · ${c.files.length} file${c.files.length===1?'':'s'}</div></li>`).join('')}</ol>`;
+}
+
+function cohortHtml(c, idx) {
+  const notes = (c.reviewNotes || []).filter(Boolean);
+  return `<h2>${idx}. ${esc(c.title)} <span class="badge ${c.layer}">${c.layer}</span></h2>
+    <p class="intent">${esc(c.intent)}</p>
+    ${c.narrative ? `<div class="narrative">${esc(c.narrative)}</div>` : ''}
+    ${notes.length ? `<div class="review-notes"><h4>Worth double-checking</h4><ul>${notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
+    ${c.files.map((fi, j) => fileHtml(fi, c.fileSummaries?.[j], files[fi].additions + files[fi].deletions > 400)).join('')}`;
+}
+
+function renderMain() {
+  const main = document.getElementById('main');
+  const s = steps[current];
+  const prev = steps[current - 1];
+  const next = steps[current + 1];
+  const stepTitle = st => st ? (st.kind === 'overview' ? 'Overview' : st.c.title) : '';
+  main.innerHTML = `<div class="step active">
+    ${s.kind === 'overview' ? overviewHtml() : cohortHtml(s.c, current)}
+    <div class="pager">
+      <button ${prev ? '' : 'disabled'} onclick="go(${current-1})"><span class="dir">← Previous</span>${esc(stepTitle(prev))}</button>
+      <button ${next ? '' : 'disabled'} onclick="go(${current+1})" style="text-align:right"><span class="dir">Next →</span>${esc(stepTitle(next))}</button>
+    </div>
+    <div class="kbd-hint">Navigate with <kbd>←</kbd> <kbd>→</kbd> · Step ${current + 1} of ${steps.length}</div>
+  </div>`;
+  if (s.kind === 'overview' && analysis.mermaid && window.mermaid) {
+    try { window.mermaid.run({ nodes: main.querySelectorAll('.mermaid') }); } catch (e) {}
+  }
+  window.scrollTo(0, 0);
+}
+
+function go(i) {
+  if (i < 0 || i >= steps.length) return;
+  current = i;
+  renderNav();
+  renderMain();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'j') go(current + 1);
+  if (e.key === 'ArrowLeft' || e.key === 'k') go(current - 1);
+});
+
+renderNav();
+renderMain();
+</script>
+<script>
+// Mermaid is optional sugar loaded from CDN; offline, the raw diagram text shows instead.
+(function () {
+  if (!DATA.analysis.mermaid) return;
+  var s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+  s.onload = function () {
+    var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    window.mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'neutral' });
+    if (current === 0) renderMain();
+  };
+  document.body.appendChild(s);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "pr-walkthrough",
+  "version": "0.1.0",
+  "description": "Generate a guided HTML walkthrough of a PR or branch diff: semantic cohorts, reading order, scoped summaries, and rendered diffs.",
+  "bin": {
+    "pr-walkthrough": "./cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
