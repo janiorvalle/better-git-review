@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · better-git-review</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --canvas: #ffffff;
+  --canvas-subtle: #f6f8fa;
+  --canvas-inset: #f6f8fa;
+  --text: #1f2328;
+  --muted: #59636e;
+  --border: #d1d9e0;
+  --border-muted: #d8dee4;
+  --accent: #0969da;
+  --accent-soft: #ddf4ff;
+  --add-bg: #e6ffec;
+  --add-num: #ccffd8;
+  --add-word: #abf2bc;
+  --del-bg: #ffebe9;
+  --del-num: #ffd7d5;
+  --del-word: #ffcecb;
+  --hunk-bg: #ddf4ff;
+  --shadow: 0 1px 0 rgba(31,35,40,.04);
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0d1117;
+    --canvas-subtle: #161b22;
+    --canvas-inset: #010409;
+    --text: #f0f6fc;
+    --muted: #9198a1;
+    --border: #3d444d;
+    --border-muted: #21262d;
+    --accent: #4493f8;
+    --accent-soft: rgba(56,139,253,.15);
+    --add-bg: rgba(46,160,67,.15);
+    --add-num: rgba(46,160,67,.25);
+    --add-word: rgba(46,160,67,.4);
+    --del-bg: rgba(248,81,73,.1);
+    --del-num: rgba(248,81,73,.2);
+    --del-word: rgba(248,81,73,.4);
+    --hunk-bg: rgba(56,139,253,.15);
+    --shadow: 0 1px 0 rgba(255,255,255,.04);
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; background: var(--canvas); }
+body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.5 var(--ui); }
+button { font: inherit; }
+.app { display: grid; grid-template-columns: 272px minmax(0, 1fr); min-height: 100vh; }
+.sidebar { position: sticky; top: 0; height: 100vh; overflow: auto; border-right: 1px solid var(--border); background: var(--canvas-subtle); padding: 18px 12px; }
+.brand { padding: 0 10px 16px; border-bottom: 1px solid var(--border-muted); margin-bottom: 12px; }
+.brand-name { font-weight: 700; font-size: 13px; color: var(--muted); }
+.brand-title { margin: 4px 0; font-weight: 650; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.range { color: var(--muted); font: 11px/1.4 var(--mono); overflow-wrap: anywhere; }
+.step-nav { display: grid; gap: 3px; }
+.step-nav-button { width: 100%; display: grid; grid-template-columns: 24px minmax(0,1fr) auto; gap: 8px; align-items: center; border: 1px solid transparent; background: transparent; color: var(--text); padding: 9px 8px; border-radius: 6px; text-align: left; cursor: pointer; }
+.step-nav-button:hover { background: var(--canvas); border-color: var(--border-muted); }
+.step-nav-button.active { background: var(--canvas); border-color: var(--border); box-shadow: var(--shadow); }
+.step-number { color: var(--muted); font: 11px var(--mono); }
+.step-label { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-count { color: var(--muted); font: 11px var(--mono); }
+.main { min-width: 0; background: var(--canvas); }
+.toolbar { position: sticky; top: 0; z-index: 20; min-height: 52px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 8px 24px; border-bottom: 1px solid var(--border); background: var(--canvas); }
+.step-counter { color: var(--muted); font-size: 12px; }
+.view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--canvas-subtle); }
+.view-toggle button { border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--muted); padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.view-toggle button:last-child { border-right: 0; }
+.view-toggle button.active { background: var(--canvas); color: var(--text); font-weight: 600; }
+.content { width: min(100%, 1480px); padding: 28px 32px 72px; }
+.step { display: none; }
+.step.active { display: block; }
+.eyebrow { color: var(--muted); font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+h1, h2 { letter-spacing: 0; }
+.step-title { font-size: 24px; line-height: 1.25; margin: 0; }
+.intent { color: var(--muted); font-size: 15px; margin: 6px 0 20px; max-width: 920px; }
+.overview-text, .narrative { max-width: 920px; font-size: 15px; margin: 18px 0; white-space: pre-wrap; }
+.overview-stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 24px; }
+.stat-pill, .layer-badge, .status-tag, .dependency-chip { display: inline-flex; align-items: center; min-height: 22px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; }
+.stat-pill { background: var(--canvas-subtle); }
+.plus { color: #1a7f37; } .minus { color: #cf222e; }
+@media (prefers-color-scheme: dark) { .plus { color: #3fb950; } .minus { color: #f85149; } }
+.layer-badge { text-transform: uppercase; letter-spacing: .04em; }
+.layer-schema { background:#fff8c5; color:#633c01; } .layer-backend { background:#ddf4ff; color:#0550ae; }
+.layer-api { background:#fbefff; color:#8250df; } .layer-ui { background:#ffeff7; color:#bf3989; }
+.layer-tests { background:#dafbe1; color:#116329; } .layer-config { background:#fff1e5; color:#953800; }
+.layer-docs { background:#eaeef2; color:#424a53; } .layer-other { background:#eaeef2; color:#424a53; }
+@media (prefers-color-scheme: dark) {
+  .layer-schema { background:#3b2e00; color:#eac54f; } .layer-backend { background:#0c2d4a; color:#79c0ff; }
+  .layer-api { background:#2f2140; color:#d2a8ff; } .layer-ui { background:#3d1830; color:#ff9bce; }
+  .layer-tests { background:#12351f; color:#56d364; } .layer-config { background:#3d240c; color:#ffa657; }
+  .layer-docs,.layer-other { background:#262c36; color:#b1bac4; }
+}
+.toc { display: grid; border-top: 1px solid var(--border); max-width: 920px; margin-top: 24px; }
+.toc-button { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; gap: 10px; align-items: center; width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); padding: 12px 4px; text-align: left; cursor: pointer; }
+.toc-button:hover .toc-title { color: var(--accent); }
+.toc-title { font-weight: 650; }
+.toc-intent { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; }
+.diagram { max-width: 920px; border: 1px solid var(--border); background: var(--canvas-subtle); padding: 16px; border-radius: 6px; overflow: auto; }
+.diagram pre { margin: 0; text-align: left; font: 12px/1.5 var(--mono); }
+.dependencies { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 18px; }
+.dependencies-label { color: var(--muted); font-size: 12px; }
+.dependency-chip { background: var(--canvas-subtle); color: var(--text); cursor: pointer; }
+.dependency-chip:hover { border-color: var(--accent); color: var(--accent); }
+.review-notes { max-width: 920px; border-left: 3px solid #bf8700; padding: 8px 0 8px 14px; margin: 18px 0 22px; }
+.review-notes h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; color: var(--muted); }
+.review-notes ul { margin: 0; padding-left: 18px; }
+.file { border: 1px solid var(--border); border-radius: 6px; margin: 0 0 20px; overflow: clip; background: var(--canvas); }
+.file-header { position: sticky; top: 52px; z-index: 10; display: grid; grid-template-columns: 28px minmax(0,1fr) auto auto; gap: 8px; align-items: center; border-bottom: 1px solid var(--border); background: var(--canvas-subtle); min-height: 44px; padding: 7px 10px; }
+.file-toggle { width: 26px; height: 26px; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 4px; }
+.file-toggle:hover { background: var(--canvas); color: var(--text); }
+.file.collapsed .file-toggle { transform: rotate(-90deg); }
+.file-path { min-width: 0; font: 600 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+.status-tag { border-radius: 4px; color: var(--muted); text-transform: capitalize; background: var(--canvas); }
+.file-stat { font: 11px var(--mono); white-space: nowrap; }
+.file-summary { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+.file.collapsed .file-body, .file.collapsed .file-summary { display: none; }
+.binary { padding: 24px; color: var(--muted); text-align: center; font-family: var(--mono); }
+.diff-scroll { overflow-x: auto; }
+.diff-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 12px/20px var(--mono); }
+.diff-table td { padding: 0; vertical-align: top; }
+.number-column { width: 48px; }
+.prefix-column { width: 24px; }
+.split-number-column { width: 46px; }
+.split-code-column { width: calc(50% - 46px); }
+.line-number { width: 48px; padding: 0 8px !important; text-align: right; color: var(--muted); background: var(--canvas-subtle); border-right: 1px solid var(--border-muted); user-select: none; }
+.line-prefix { width: 24px; text-align: center; user-select: none; }
+.code { white-space: pre; padding: 0 12px !important; overflow: visible; }
+.line-a { background: var(--add-bg); } .line-a .line-number { background: var(--add-num); }
+.line-d { background: var(--del-bg); } .line-d .line-number { background: var(--del-num); }
+.line-a mark.word-change { background: var(--add-word); } .line-d mark.word-change { background: var(--del-word); }
+mark.word-change { color: inherit; border-radius: 2px; }
+.hunk-row td { background: var(--hunk-bg); color: var(--muted); padding: 4px 12px !important; }
+.blame-row td { border-top: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); background: var(--canvas-subtle); color: var(--muted); padding: 4px 12px !important; font: 11px/18px var(--ui); }
+.blame-author { color: var(--text); font-weight: 600; }
+.fold-row td { background: var(--canvas-subtle); border-block: 1px solid var(--border-muted); }
+.fold-button { width: 100%; border: 0; background: transparent; color: var(--muted); padding: 4px 12px; text-align: left; cursor: pointer; font: 11px/18px var(--ui); }
+.fold-button:hover { color: var(--accent); background: var(--accent-soft); }
+.fold-hidden { display: none; }
+.placeholder { background-color: var(--canvas-inset); background-image: repeating-linear-gradient(135deg, transparent, transparent 5px, color-mix(in srgb, var(--border) 34%, transparent) 5px, color-mix(in srgb, var(--border) 34%, transparent) 7px); }
+.split-table .line-number { width: 46px; }
+.split-code { width: calc(50% - 46px); overflow: hidden; }
+.view-split { display: none; }
+body[data-view="split"] .view-unified { display: none; }
+body[data-view="split"] .view-split { display: block; }
+.pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border); }
+.pager-button { min-height: 46px; border: 1px solid var(--border); border-radius: 6px; background: var(--canvas); color: var(--text); padding: 7px 12px; cursor: pointer; text-align: left; }
+.pager-button.next { text-align: right; }
+.pager-button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pager-button:disabled { opacity: .35; cursor: default; }
+.pager-direction { display: block; color: var(--muted); font-size: 11px; }
+.pager-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+{{.ChromaLight}}
+@media (prefers-color-scheme: dark) { {{.ChromaDark}} }
+@media (max-width: 820px) {
+  .app { display: block; }
+  .sidebar { position: sticky; height: auto; max-height: 170px; z-index: 30; border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
+  .brand { display: none; }
+  .step-nav { display: flex; overflow-x: auto; gap: 6px; }
+  .step-nav-button { flex: 0 0 auto; width: auto; grid-template-columns: 20px auto auto; }
+  .step-label { max-width: 180px; }
+  .toolbar { top: 61px; padding-inline: 14px; }
+  .content { padding: 20px 12px 56px; }
+  .file-header { top: 113px; grid-template-columns: 28px minmax(0,1fr) auto; }
+  .status-tag { display: none; }
+  .split-table { min-width: 900px; }
+  .pager { grid-template-columns: 1fr 1fr; }
+  .pager-count { grid-column: 1 / -1; grid-row: 1; text-align: center; }
+}
+</style>
+</head>
+<body data-view="unified">
+<div class="app">
+  <aside class="sidebar" aria-label="Walkthrough steps">
+    <div class="brand">
+      <div class="brand-name">better-git-review</div>
+      <div class="brand-title">{{.Title}}</div>
+      <div class="range">{{.Range}}</div>
+    </div>
+    <nav class="step-nav">
+      {{range .Steps}}
+      <button class="step-nav-button{{if .IsOverview}} active{{end}}" type="button" data-step-target="{{.Index}}">
+        <span class="step-number">{{if .IsOverview}}◆{{else}}{{.Number}}{{end}}</span>
+        <span class="step-label">{{.Title}}</span>
+        <span class="file-count">{{.FileCount}}</span>
+      </button>
+      {{end}}
+    </nav>
+  </aside>
+  <div class="main">
+    <header class="toolbar">
+      <div class="step-counter" id="step-counter">Overview</div>
+      <div class="view-toggle" role="group" aria-label="Diff view">
+        <button type="button" data-view-target="unified" class="active">Unified</button>
+        <button type="button" data-view-target="split">Split</button>
+      </div>
+    </header>
+    <main class="content">
+      {{range .Steps}}
+      <section class="step{{if .IsOverview}} active{{end}}" id="{{.ID}}" data-step="{{.Index}}" data-step-title="{{.Title}}">
+        {{if .IsOverview}}
+          <div class="eyebrow">Guided walkthrough</div>
+          <h1 class="step-title">{{$.Title}}</h1>
+          <div class="overview-stats">
+            <span class="stat-pill">{{$.TotalFiles}} files</span>
+            <span class="stat-pill plus">+{{$.Additions}}</span>
+            <span class="stat-pill minus">−{{$.Deletions}}</span>
+          </div>
+          <div class="overview-text">{{$.Overview}}</div>
+          {{with $.Mermaid}}<div class="diagram"><pre class="mermaid">{{.}}</pre></div>{{end}}
+          <div class="toc">
+            {{range $step := $.Steps}}{{if not $step.IsOverview}}
+            <button type="button" class="toc-button" data-step-target="{{$step.Index}}">
+              <span class="step-number">{{$step.Number}}</span>
+              <span><span class="toc-title">{{$step.Title}}</span><span class="toc-intent">{{$step.Intent}}</span></span>
+              <span class="layer-badge layer-{{$step.Layer}}">{{$step.Layer}}</span>
+            </button>
+            {{end}}{{end}}
+          </div>
+        {{else}}
+          <div class="eyebrow">Step {{.Number}} <span class="layer-badge layer-{{.Layer}}">{{.Layer}}</span></div>
+          <h2 class="step-title">{{.Title}}</h2>
+          <p class="intent">{{.Intent}}</p>
+          {{if .Dependencies}}<div class="dependencies"><span class="dependencies-label">Depends on:</span>{{range .Dependencies}}<button class="dependency-chip" type="button" data-step-target="{{.StepIndex}}">{{.Title}}</button>{{end}}</div>{{end}}
+          <div class="narrative">{{.Narrative}}</div>
+          {{if .ReviewNotes}}<div class="review-notes"><h3>Worth double-checking</h3><ul>{{range .ReviewNotes}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
+          {{range $position, $fileIndex := .FileIndexes}}{{$file := index $.Files $fileIndex}}
+          <article class="file{{if $file.Collapsed}} collapsed{{end}}" data-file="{{$file.Index}}">
+            <header class="file-header">
+              <button type="button" class="file-toggle" aria-label="Toggle {{$file.Path}}" aria-expanded="{{if $file.Collapsed}}false{{else}}true{{end}}">▼</button>
+              <div class="file-path">{{$file.Path}}</div>
+              <span class="status-tag">{{$file.Status}}</span>
+              <span class="file-stat"><span class="plus">+{{$file.Additions}}</span> <span class="minus">−{{$file.Deletions}}</span></span>
+            </header>
+            {{if $file.Summary}}<div class="file-summary">{{$file.Summary}}</div>{{end}}
+            <div class="file-body">
+              {{if $file.Binary}}<div class="binary">Binary file</div>{{else}}
+              <div class="view-unified diff-scroll">
+                <table class="diff-table" aria-label="Unified diff for {{$file.Path}}">
+                <colgroup><col class="number-column"><col class="number-column"><col class="prefix-column"><col></colgroup>
+                <tbody>
+                {{range $row := $file.UnifiedRows}}
+                  {{if and $row.FoldCount $row.Hidden}}<tr class="fold-row" data-fold-control="{{$row.FoldID}}"><td colspan="4"><button type="button" class="fold-button" data-fold-target="{{$row.FoldID}}">↕ {{$row.FoldCount}} unmodified lines</button></td></tr>{{end}}
+                  {{if eq $row.Kind "hunk"}}<tr class="hunk-row"><td colspan="4">@@ {{$row.Header}}</td></tr>
+                  {{else if eq $row.Kind "blame"}}<tr class="blame-row"><td colspan="4"><span class="blame-author">{{$row.Blame.Author}}</span> · {{$row.Blame.Date}}</td></tr>
+                  {{else}}<tr class="line-{{$row.Class}}{{if $row.Hidden}} fold-hidden{{end}}"{{if $row.Hidden}} data-fold-group="{{$row.FoldID}}"{{end}}><td class="line-number">{{if $row.Old}}{{$row.Old}}{{end}}</td><td class="line-number">{{if $row.New}}{{$row.New}}{{end}}</td><td class="line-prefix">{{$row.Prefix}}</td><td class="code chroma">{{$row.Code}}</td></tr>{{end}}
+                {{end}}
+                </tbody></table>
+              </div>
+              <div class="view-split diff-scroll">
+                <table class="diff-table split-table" aria-label="Split diff for {{$file.Path}}">
+                <colgroup><col class="split-number-column"><col class="split-code-column"><col class="split-number-column"><col class="split-code-column"></colgroup>
+                <tbody>
+                {{range $row := $file.SplitRows}}
+                  {{if and $row.FoldCount $row.Hidden}}<tr class="fold-row" data-fold-control="{{$row.FoldID}}"><td colspan="4"><button type="button" class="fold-button" data-fold-target="{{$row.FoldID}}">↕ {{$row.FoldCount}} unmodified lines</button></td></tr>{{end}}
+                  {{if eq $row.Kind "hunk"}}<tr class="hunk-row"><td colspan="4">@@ {{$row.Header}}</td></tr>
+                  {{else if eq $row.Kind "blame"}}<tr class="blame-row"><td colspan="4"><span class="blame-author">{{$row.Blame.Author}}</span> · {{$row.Blame.Date}}</td></tr>
+                  {{else}}<tr{{if $row.Hidden}} class="fold-hidden" data-fold-group="{{$row.FoldID}}"{{end}}>
+                    <td class="line-number line-{{$row.Old.Class}}">{{if $row.Old.Number}}{{$row.Old.Number}}{{end}}</td>
+                    <td class="code chroma split-code line-{{$row.Old.Class}}{{if $row.Old.Placeholder}} placeholder{{end}}">{{$row.Old.Code}}</td>
+                    <td class="line-number line-{{$row.New.Class}}">{{if $row.New.Number}}{{$row.New.Number}}{{end}}</td>
+                    <td class="code chroma split-code line-{{$row.New.Class}}{{if $row.New.Placeholder}} placeholder{{end}}">{{$row.New.Code}}</td>
+                  </tr>{{end}}
+                {{end}}
+                </tbody></table>
+              </div>
+              {{end}}
+            </div>
+          </article>
+          {{end}}
+        {{end}}
+        <div class="pager">
+          <button type="button" class="pager-button prev"><span class="pager-direction">← Previous</span><span class="pager-label"></span></button>
+          <span class="pager-count"></span>
+          <button type="button" class="pager-button next"><span class="pager-direction">Next →</span><span class="pager-label"></span></button>
+        </div>
+      </section>
+      {{end}}
+    </main>
+  </div>
+</div>
+<script id="walkthrough-data" type="application/json">{{.JSON}}</script>
+{{if .Mermaid}}<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" defer></script>{{end}}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var steps = Array.from(document.querySelectorAll(".step"));
+  var navButtons = Array.from(document.querySelectorAll(".step-nav-button"));
+  var current = 0;
+  var storedView = "unified";
+  try { storedView = localStorage.getItem("better-git-review-view") || "unified"; } catch (_) {}
+
+  function stepTitle(index) {
+    return steps[index] ? steps[index].dataset.stepTitle : "";
+  }
+  function updatePager(section) {
+    var prev = section.querySelector(".pager-button.prev");
+    var next = section.querySelector(".pager-button.next");
+    var count = section.querySelector(".pager-count");
+    prev.disabled = current === 0;
+    next.disabled = current === steps.length - 1;
+    prev.dataset.stepTarget = String(current - 1);
+    next.dataset.stepTarget = String(current + 1);
+    prev.querySelector(".pager-label").textContent = stepTitle(current - 1);
+    next.querySelector(".pager-label").textContent = stepTitle(current + 1);
+    count.textContent = "Step " + (current + 1) + " of " + steps.length;
+  }
+  function go(index) {
+    if (index < 0 || index >= steps.length) return;
+    current = index;
+    steps.forEach(function (step, i) { step.classList.toggle("active", i === current); });
+    navButtons.forEach(function (button, i) { button.classList.toggle("active", i === current); });
+    document.getElementById("step-counter").textContent = stepTitle(current);
+    updatePager(steps[current]);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+  function setView(view) {
+    if (view !== "split") view = "unified";
+    document.body.dataset.view = view;
+    document.querySelectorAll("[data-view-target]").forEach(function (button) {
+      button.classList.toggle("active", button.dataset.viewTarget === view);
+    });
+    try { localStorage.setItem("better-git-review-view", view); } catch (_) {}
+  }
+
+  document.addEventListener("click", function (event) {
+    var stepButton = event.target.closest("[data-step-target]");
+    if (stepButton) {
+      go(Number(stepButton.dataset.stepTarget));
+      return;
+    }
+    var viewButton = event.target.closest("[data-view-target]");
+    if (viewButton) {
+      setView(viewButton.dataset.viewTarget);
+      return;
+    }
+    var fileButton = event.target.closest(".file-toggle");
+    if (fileButton) {
+      var file = fileButton.closest(".file");
+      file.classList.toggle("collapsed");
+      fileButton.setAttribute("aria-expanded", String(!file.classList.contains("collapsed")));
+      return;
+    }
+    var foldButton = event.target.closest("[data-fold-target]");
+    if (foldButton) {
+      var id = foldButton.dataset.foldTarget;
+      document.querySelectorAll("[data-fold-group=\"" + CSS.escape(id) + "\"]").forEach(function (row) {
+        row.classList.remove("fold-hidden");
+      });
+      document.querySelectorAll("[data-fold-control=\"" + CSS.escape(id) + "\"]").forEach(function (row) {
+        row.remove();
+      });
+    }
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.target.matches("input, textarea, select")) return;
+    if (event.key === "ArrowRight") go(current + 1);
+    if (event.key === "ArrowLeft") go(current - 1);
+  });
+
+  setView(storedView);
+  go(0);
+  if (window.mermaid) {
+    try {
+      window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "neutral" });
+      window.mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+    } catch (_) {}
+  }
+});
+</script>
+</body>
+</html>
