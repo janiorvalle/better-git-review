@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -22,7 +23,14 @@ func runCommand(ctx context.Context, dir string, input []byte, name string, args
 		if detail == "" {
 			detail = err.Error()
 		}
-		return nil, fmt.Errorf("%s: %s", name, detail)
+		return nil, fmt.Errorf("%s: %s", name, safeDiagnostic(detail, 1_000))
 	}
 	return stdout.Bytes(), nil
+}
+
+func safeDiagnostic(value string, limit int) string {
+	if len(value) > limit {
+		value = value[:limit] + "... [truncated]"
+	}
+	return strconv.QuoteToASCII(value)
 }

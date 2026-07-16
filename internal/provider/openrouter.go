@@ -89,7 +89,7 @@ func (p *OpenRouter) complete(ctx context.Context, prompt string, schema json.Ra
 		return nil, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("openrouter returned %s: %.500s", response.Status, body)
+		return nil, fmt.Errorf("openrouter returned %s: %s", response.Status, safeDiagnostic(string(body), 500))
 	}
 	var decoded struct {
 		Error *struct {
@@ -108,7 +108,7 @@ func (p *OpenRouter) complete(ctx context.Context, prompt string, schema json.Ra
 		return nil, fmt.Errorf("parse openrouter response: %w", err)
 	}
 	if decoded.Error != nil {
-		return nil, fmt.Errorf("openrouter generation error: %s", decoded.Error.Message)
+		return nil, fmt.Errorf("openrouter generation error: %s", safeDiagnostic(decoded.Error.Message, 500))
 	}
 	if len(decoded.Choices) == 0 {
 		return nil, fmt.Errorf("openrouter response contained no choices")

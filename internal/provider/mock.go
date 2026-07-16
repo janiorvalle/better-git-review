@@ -32,8 +32,12 @@ func (p *Mock) Complete(_ context.Context, prompt string) (string, error) {
 	pattern := regexp.MustCompile(`(?m)^===== FILE (\d+): (.+) \(([^,]+), \+(\d+)/-(\d+)\) =====$`)
 	for _, match := range pattern.FindAllStringSubmatch(prompt, -1) {
 		index, _ := strconv.Atoi(match[1])
+		path := match[2]
+		if unquoted, err := strconv.Unquote(path); err == nil {
+			path = unquoted
+		}
 		files = append(files, promptFile{
-			index: index, path: match[2], status: match[3], additions: match[4], deletions: match[5],
+			index: index, path: path, status: match[3], additions: match[4], deletions: match[5],
 		})
 	}
 	if len(files) == 0 {
