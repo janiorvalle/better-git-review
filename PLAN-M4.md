@@ -143,15 +143,79 @@ beyond Part 2's items.
 
 ---
 
+## Part 4 — Dogfooding fixes (running list)
+
+26. **BUG: diff add/del backgrounds invisible in the code area.** Diagnosed:
+    chroma's generated CSS sets an opaque `background-color` on `.chroma`,
+    and every code `<td>` carries that class — it paints over the row's
+    translucent `--add-bg`/`--del-bg`, so only the line-number gutter tints.
+    Both themes affected. Fix: strip `background-color` from the generated
+    chroma CSS in `ChromaCSS()` (or override `.chroma { background:
+    transparent }`), and revisit the dark alphas (0.15/0.10 are barely
+    perceptible on `#0d1117` even once visible — CodeRabbit's reference
+    reads much stronger, with a solid left edge accent per changed line).
+    *Small enough to hotfix ahead of any gate.*
+
+*(more items land here as dogfooding continues)*
+
+## Part 5 — Design workstream: new ownership split
+
+**Process change (owner decision, 2026-07-16):** Codex-gate handoffs
+continue to own everything EXCEPT design. Visual/UX design of the viewer is
+owned by Claude directly (design-skill-assisted), working in the same
+branch/PR discipline. Rationale: the target is the CodeRabbit-concept
+aesthetic (see `reference/coderabbit-diff-viewer.png`), and design iteration
+via engineering handoffs loses too much in translation.
+
+**Design direction (owner preference):** move the viewer toward the
+CodeRabbit reference — stronger diff color presence with left-edge accents,
+vivid syntax palette on dark, tighter file chrome, the overall "guided
+review tool" feel rather than "rendered document."
+
+**Boundary between the lanes:**
+- *Claude (design lane):* everything inside `internal/viewer/template.html`'s
+  CSS + markup structure and the visual parts of `viewer/*.go` rendering
+  (chroma style choice, tokens, spacing, chrome). Direction locked with the
+  owner via mockups BEFORE implementation.
+- *Codex (engineering lane):* any new data the design needs (e.g. new
+  document fields), behavioral JS, build/CI, and everything in Parts 1–3.
+- Sequencing: design direction can be explored in parallel with the M4
+  engineering gate; design implementation lands as its own gate (M5) on top.
+
+**Design-skill inventory (pass done 2026-07-16)** — applicable skills and
+their role in the M5 flow:
+1. `interactive-mockup` — lock direction: 2–3 visual treatments of one real
+   cohort step as clickable states, owner picks before any real work.
+2. `ideas` — in-browser comparison/picker for finer calls (accent styles,
+   density, file-chrome variants).
+3. `design` / `ui` — the main build pass under the ui.sh guideline system.
+4. `frontend-design` — production-grade polish pass; explicitly guards
+   against generic-AI aesthetics.
+5. `add-dark-mode` — dark theme done as surfaces/shadows/color systems
+   rather than alpha-tweaks; directly addresses the washed-out dark diff.
+6. `markup-from-image` — extract semantic structure from the CodeRabbit
+   reference screenshot as a starting skeleton where useful.
+7. `make-responsive` — the viewer's narrow-viewport story (currently the
+   sidebar just hides).
+Not applicable: `canonicalize-tailwind` (hand-written CSS, no Tailwind),
+`brand-kit`/`dark-mode-image` (no brand/raster needs), `componentize`
+(single Go-templated file; component extraction happens naturally in the
+template structure).
+
 ## Suggested gate shape
 
-Single gate (M4), three workstreams matching the parts above, in this
-order: Part 3 first (simplify on a quiet codebase before adding to it),
-then Part 2 (features on the cleaned base), then Part 1 (CI/release last so
-the new Windows job and policies validate the final state). Same process:
-branch `gate/m4-polish`, PR, testing policy applies (unit + e2e for every
-behavioral item: `--dirty`, `--open` per-OS dispatch table, bgr presence in
-snapshot archives, Windows paths, policy tests themselves).
+- **Hotfix (now, no gate):** Part 4 #26 — the chroma background bug. One
+  focused PR, fast merge, dogfooding immediately improves.
+- **Gate M4 (Codex):** Parts 1–3 + accumulated Part 4 engineering items, in
+  this order: Part 3 first (simplify on a quiet codebase before adding to
+  it), then Part 2 (features on the cleaned base), then Part 1 (CI/release
+  last so the new Windows job and policies validate the final state).
+  Branch `gate/m4-polish`, PR, full testing policy (unit + e2e for every
+  behavioral item: `--dirty`, `--open` per-OS dispatch table, bgr presence
+  in snapshot archives, Windows paths, policy tests themselves).
+- **Gate M5 (Claude, design lane):** direction lock via mockups → viewer
+  redesign toward the CodeRabbit concept → PR under the same review
+  discipline (owner reviews visually; e2e suite must stay green).
 
 ## Open questions for review
 
