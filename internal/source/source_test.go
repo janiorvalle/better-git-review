@@ -2,39 +2,52 @@ package source
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
+	"errors"
+	"slices"
 	"testing"
 )
 
-func TestDetectBaseSkipsDanglingOriginHead(t *testing.T) {
-	repo := t.TempDir()
-	runGitTest(t, repo, "init", "-b", "main")
-	runGitTest(t, repo, "config", "user.email", "source@example.com")
-	runGitTest(t, repo, "config", "user.name", "Source Test")
-	if err := os.WriteFile(filepath.Join(repo, "file.txt"), []byte("base\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runGitTest(t, repo, "add", "file.txt")
-	runGitTest(t, repo, "commit", "-m", "base")
-	runGitTest(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/missing")
-
-	base, err := DetectBase(context.Background(), repo)
+func TestRegistrySelectsFirstDetectedSource(t *testing.T) {
+	registry := NewRegistry(
+		fakeSource{name: "first", available: false},
+		fakeSource{name: "second", available: true, result: Result{Diff: []byte("diff")}},
+		fakeSource{name: "third", available: true},
+	)
+	result, err := registry.Collect(context.Background(), Options{RepoDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if base != "main" {
-		t.Fatalf("base = %q, want main", base)
+	if string(result.Diff) != "diff" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if names := registry.Names(); !slices.Equal(names, []string{"first", "second", "third"}) {
+		t.Fatalf("names = %#v", names)
 	}
 }
 
-func runGitTest(t *testing.T, repo string, args ...string) {
-	t.Helper()
-	command := exec.Command("git", args...)
-	command.Dir = repo
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+func TestRegistryAnnotatesCollectionErrors(t *testing.T) {
+	registry := NewRegistry(fakeSource{name: "github", available: true, err: errors.New("boom")})
+	if _, err := registry.Collect(context.Background(), Options{RepoDir: t.TempDir()}); err == nil ||
+		err.Error() != "github source: boom" {
+		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+type fakeSource struct {
+	name      string
+	available bool
+	result    Result
+	err       error
+}
+
+func (f fakeSource) Name() string {
+	return f.name
+}
+
+func (f fakeSource) Detect(Options) (bool, string) {
+	return f.available, "test"
+}
+
+func (f fakeSource) Collect(context.Context, Options) (Result, error) {
+	return f.result, f.err
 }

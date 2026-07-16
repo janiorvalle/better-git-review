@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}} · better-git-review</title>
+<title>{{.Title}} · bgr</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -158,8 +158,10 @@ body[data-view="split"] .view-split { display: block; }
 .pager-button:disabled { opacity: .35; cursor: default; }
 .pager-direction { display: block; color: var(--muted); font-size: 11px; }
 .pager-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
-{{.ChromaLight}}
-@media (prefers-color-scheme: dark) { {{.ChromaDark}} }
+{{.ChromaTokens}}
+:root { {{.ChromaLight}} }
+@media (prefers-color-scheme: light) { {{.ChromaLightRules}} }
+@media (prefers-color-scheme: dark) { :root { {{.ChromaDark}} } {{.ChromaDarkRules}} }
 @media (max-width: 820px) {
   .app { display: block; }
   .sidebar { position: sticky; height: auto; max-height: 170px; z-index: 30; border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
@@ -181,7 +183,7 @@ body[data-view="split"] .view-split { display: block; }
 <div class="app">
   <aside class="sidebar" aria-label="Walkthrough steps">
     <div class="brand">
-      <div class="brand-name">better-git-review</div>
+      <div class="brand-name">bgr</div>
       <div class="brand-title">{{.Title}}</div>
       <div class="range">{{.Range}}</div>
     </div>

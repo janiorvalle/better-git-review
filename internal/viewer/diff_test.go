@@ -1,6 +1,7 @@
 package viewer
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -64,7 +65,16 @@ func TestFoldingBoundary(t *testing.T) {
 		for index := range rows {
 			rows[index] = UnifiedRow{Kind: "line", Class: "c"}
 		}
-		applyUnifiedFolds(rows, "fold")
+		applyFolds(
+			rows,
+			"fold",
+			func(row UnifiedRow) bool { return row.Kind == "line" && row.Class == "c" },
+			func(row *UnifiedRow, foldID string, foldCount int) {
+				row.Hidden = true
+				row.FoldID = foldID
+				row.FoldCount = foldCount
+			},
+		)
 		return rows
 	}
 	atThreshold := build(FoldThreshold)
@@ -134,5 +144,39 @@ func TestHighlightKnownAndUnknownExtensions(t *testing.T) {
 	unknown := newHighlighter("file.unknownextension").highlight("plain < text", nil)
 	if string(unknown) != "plain &lt; text" {
 		t.Fatalf("unknown extension should be escaped plain text: %s", unknown)
+	}
+}
+
+func TestChromaThemeUsesCompleteVariablePaletteWithoutBackgrounds(t *testing.T) {
+	theme, err := ChromaThemeCSS("github", "github-dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := string(theme.TokenCSS) + string(theme.LightVariables) + string(theme.DarkVariables) +
+		string(theme.LightRules) + string(theme.DarkRules)
+	if strings.Contains(combined, "background") {
+		t.Fatalf("generated Chroma theme still sets backgrounds:\n%s", combined)
+	}
+	if strings.Contains(combined, ": ;") {
+		t.Fatalf("generated Chroma theme contains an empty variable:\n%s", combined)
+	}
+	variablePattern := regexp.MustCompile(`var\((--chroma-[^)]+)\)`)
+	for _, match := range variablePattern.FindAllStringSubmatch(string(theme.TokenCSS), -1) {
+		variable := match[1] + ":"
+		if !strings.Contains(string(theme.LightVariables), variable) {
+			t.Errorf("light palette does not define %s", match[1])
+		}
+		if !strings.Contains(string(theme.DarkVariables), variable) {
+			t.Errorf("dark palette does not define %s", match[1])
+		}
+	}
+	if !strings.Contains(string(theme.DarkVariables), "#e6edf3") {
+		t.Fatal("dark palette does not carry the GitHub-dark foreground fallback")
+	}
+	if strings.Contains(string(theme.LightRules), ".chroma .c {") {
+		t.Fatal("dark-only comment typography leaked into the light theme")
+	}
+	if !strings.Contains(string(theme.DarkRules), ".chroma .c { font-style: italic; }") {
+		t.Fatal("dark comment typography is missing from the dark theme")
 	}
 }

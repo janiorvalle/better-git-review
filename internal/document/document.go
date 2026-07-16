@@ -82,7 +82,7 @@ type Meta struct {
 }
 
 func Generator() string {
-	return "better-git-review " + Version
+	return "bgr " + Version
 }
 
 func IsLayer(layer string) bool {

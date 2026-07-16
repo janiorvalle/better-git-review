@@ -1,19 +1,32 @@
-package provider
+package codex
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/janiorvalle/better-git-review/internal/provider"
 )
 
-type CodexCLI struct {
+type Adapter struct{}
+
+func (Adapter) Name() string {
+	return "codex-cli"
+}
+
+func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, error) {
+	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "default")
+	return &CLI{Model: model}, model, nil
+}
+
+type CLI struct {
 	Model string
 }
 
-func (p *CodexCLI) Name() string { return "codex-cli" }
+func (p *CLI) Name() string { return "codex-cli" }
 
-func (p *CodexCLI) Detect() (bool, string) {
+func (p *CLI) Detect() (bool, string) {
 	path, err := exec.LookPath("codex")
 	if err != nil {
 		return false, "codex executable not found"
@@ -21,7 +34,7 @@ func (p *CodexCLI) Detect() (bool, string) {
 	return true, "found " + path
 }
 
-func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) {
+func (p *CLI) Complete(ctx context.Context, prompt string) (string, error) {
 	isolatedDir, err := os.MkdirTemp("", "better-git-review-codex-workspace-*")
 	if err != nil {
 		return "", err
@@ -43,9 +56,7 @@ func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) 
 		"--ignore-user-config",
 		"--ignore-rules",
 	}
-	// The diff is already in the prompt, so the agent gets no host-reading,
-	// connector, plugin, browser, computer-use, image, subagent, or web tools.
-	for _, feature := range disabledCodexFeatures {
+	for _, feature := range disabledFeatures {
 		args = append(args, "--disable", feature)
 	}
 	args = append(args,
@@ -60,7 +71,7 @@ func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) 
 		args = append(args, "--model", p.Model)
 	}
 	args = append(args, "-")
-	if _, err := runCommand(ctx, isolatedDir, []byte(prompt), "codex", args...); err != nil {
+	if _, err := provider.RunCommand(ctx, isolatedDir, []byte(prompt), "codex", args...); err != nil {
 		return "", err
 	}
 	output, err := os.ReadFile(outputPath)
@@ -70,7 +81,7 @@ func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) 
 	return string(output), nil
 }
 
-var disabledCodexFeatures = []string{
+var disabledFeatures = []string{
 	"apps",
 	"auth_elicitation",
 	"browser_use",

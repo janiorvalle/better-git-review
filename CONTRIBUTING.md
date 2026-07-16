@@ -12,10 +12,12 @@ Requirements:
 Clone the repository and run the deterministic suite:
 
 ```sh
-go build ./...
-go vet ./...
-go test ./...
+make verify
 ```
+
+`make verify` is the same local gate CI runs: build, vet, tests, GoReleaser
+configuration validation, snapshot archives, and an installed-artifact smoke
+test.
 
 Tests must not depend on an LLM, network access, a user configuration file, or
 a populated cache. The mock provider is the default tool for end-to-end tests.
@@ -41,8 +43,21 @@ is absent. Real-provider tests never run in normal CI.
 Before opening a pull request, run:
 
 ```sh
-go build ./... && go vet ./... && go test ./...
+make verify
 ```
+
+Install the optional pre-commit secret scan after installing `gitleaks`:
+
+```sh
+make install-hooks
+```
+
+## Release Setup
+
+The repository owner must create a GitHub environment named `release` under
+Settings > Environments and add the desired deployment protection rules. The
+tag workflow is already bound to that environment; repository settings are not
+changed by the workflow itself.
 
 ## Writing A Provider
 
@@ -106,3 +121,9 @@ seatbelts from the core. They skip only free-form extraction and repair.
 A typical CLI adapter should remain around 50 lines because the core guarantees
 the same validation, retry, staging, security, and output behavior for every
 provider.
+
+## Licensing
+
+Contributions are licensed under the MIT License and the project's contributor
+license agreement. The CLA check runs automatically on a contributor's first
+pull request.

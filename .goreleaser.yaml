@@ -3,6 +3,22 @@ version: 2
 project_name: better-git-review
 
 builds:
+  - id: bgr
+    main: ./cmd/bgr
+    binary: bgr
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/janiorvalle/better-git-review/internal/document.Version={{ .Version }}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
   - id: better-git-review
     main: ./cmd/better-git-review
     binary: better-git-review
@@ -22,6 +38,7 @@ builds:
 
 archives:
   - ids:
+      - bgr
       - better-git-review
     formats:
       - tar.gz
@@ -37,7 +54,24 @@ checksum:
 
 changelog:
   sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*feat(\([^)]*\))?:'
+      order: 0
+    - title: Fixes
+      regexp: '^.*fix(\([^)]*\))?:'
+      order: 1
+    - title: Refactoring
+      regexp: '^.*refactor(\([^)]*\))?:'
+      order: 2
+    - title: CI
+      regexp: '^.*ci(\([^)]*\))?:'
+      order: 3
+    - title: Documentation
+      regexp: '^.*docs(\([^)]*\))?:'
+      order: 4
+    - title: Other
+      order: 999
   filters:
     exclude:
-      - "^docs:"
       - "^test:"

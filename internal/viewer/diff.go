@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"regexp"
+	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
@@ -109,11 +110,29 @@ func BuildRows(file document.File, fileIndex int) ([]UnifiedRow, []SplitRow) {
 				Code:   highlighter.highlight(line.Text, span),
 			})
 		}
-		applyUnifiedFolds(unified[startUnified:], fmt.Sprintf("u-%d-%d", fileIndex, hunkIndex))
+		applyFolds(
+			unified[startUnified:],
+			fmt.Sprintf("u-%d-%d", fileIndex, hunkIndex),
+			func(row UnifiedRow) bool { return row.Kind == "line" && row.Class == "c" },
+			func(row *UnifiedRow, foldID string, foldCount int) {
+				row.Hidden = true
+				row.FoldID = foldID
+				row.FoldCount = foldCount
+			},
+		)
 
 		startSplit := len(split)
 		split = append(split, buildSplitLines(hunk.Lines, pairs, highlighter)...)
-		applySplitFolds(split[startSplit:], fmt.Sprintf("s-%d-%d", fileIndex, hunkIndex))
+		applyFolds(
+			split[startSplit:],
+			fmt.Sprintf("s-%d-%d", fileIndex, hunkIndex),
+			isSplitContext,
+			func(row *SplitRow, foldID string, foldCount int) {
+				row.Hidden = true
+				row.FoldID = foldID
+				row.FoldCount = foldCount
+			},
+		)
 	}
 	return unified, split
 }
@@ -211,46 +230,30 @@ func cellForLine(line document.HunkLine, highlighter *syntaxHighlighter, span *S
 	return LineCell{Number: number, Code: highlighter.highlight(line.Text, span), Class: line.Type}
 }
 
-func applyUnifiedFolds(rows []UnifiedRow, id string) {
+func applyFolds[T any](
+	rows []T,
+	id string,
+	isContext func(T) bool,
+	mark func(*T, string, int),
+) {
 	for start := 0; start < len(rows); {
-		if rows[start].Kind != "line" || rows[start].Class != "c" {
+		if !isContext(rows[start]) {
 			start++
 			continue
 		}
 		end := start
-		for end < len(rows) && rows[end].Kind == "line" && rows[end].Class == "c" {
+		for end < len(rows) && isContext(rows[end]) {
 			end++
 		}
 		if end-start > FoldThreshold {
 			foldStart, foldEnd := start+3, end-3
-			rows[foldStart].FoldID = id
-			rows[foldStart].FoldCount = foldEnd - foldStart
+			foldCount := foldEnd - foldStart
 			for index := foldStart; index < foldEnd; index++ {
-				rows[index].Hidden = true
-				rows[index].FoldID = id
-			}
-		}
-		start = end
-	}
-}
-
-func applySplitFolds(rows []SplitRow, id string) {
-	for start := 0; start < len(rows); {
-		if !isSplitContext(rows[start]) {
-			start++
-			continue
-		}
-		end := start
-		for end < len(rows) && isSplitContext(rows[end]) {
-			end++
-		}
-		if end-start > FoldThreshold {
-			foldStart, foldEnd := start+3, end-3
-			rows[foldStart].FoldID = id
-			rows[foldStart].FoldCount = foldEnd - foldStart
-			for index := foldStart; index < foldEnd; index++ {
-				rows[index].Hidden = true
-				rows[index].FoldID = id
+				count := 0
+				if index == foldStart {
+					count = foldCount
+				}
+				mark(&rows[index], id, count)
 			}
 		}
 		start = end
@@ -321,7 +324,27 @@ func (h *syntaxHighlighter) highlightPart(text string) string {
 	return strings.TrimSuffix(output.String(), "\n")
 }
 
-func ChromaCSS(styleName string) (template.CSS, error) {
+type ChromaTheme struct {
+	TokenCSS       template.CSS
+	LightVariables template.CSS
+	DarkVariables  template.CSS
+	LightRules     template.CSS
+	DarkRules      template.CSS
+}
+
+func ChromaThemeCSS(lightStyleName, darkStyleName string) (ChromaTheme, error) {
+	lightCSS, err := chromaCSS(lightStyleName)
+	if err != nil {
+		return ChromaTheme{}, err
+	}
+	darkCSS, err := chromaCSS(darkStyleName)
+	if err != nil {
+		return ChromaTheme{}, err
+	}
+	return buildChromaTheme(lightCSS, darkCSS), nil
+}
+
+func chromaCSS(styleName string) (string, error) {
 	style := styles.Get(styleName)
 	if style == nil {
 		return "", fmt.Errorf("chroma style %q not found", styleName)
@@ -331,9 +354,124 @@ func ChromaCSS(styleName string) (template.CSS, error) {
 	if err := formatter.WriteCSS(&output, style); err != nil {
 		return "", err
 	}
-	return template.CSS(output.String()), nil
+	return output.String(), nil
 }
 
-func IsPlainHighlighted(value template.HTML, input string) bool {
-	return string(value) == template.HTMLEscapeString(input) && utf8.ValidString(input)
+type chromaRule struct {
+	color        string
+	declarations []string
+}
+
+var (
+	cssRulePattern = regexp.MustCompile(`(?s)([^{}]+)\{([^{}]*)\}`)
+	cssVarPattern  = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+)
+
+func buildChromaTheme(lightCSS, darkCSS string) ChromaTheme {
+	lightRules := parseChromaRules(lightCSS)
+	darkRules := parseChromaRules(darkCSS)
+	selectors := make([]string, 0, len(lightRules)+len(darkRules))
+	seen := map[string]bool{}
+	for selector := range lightRules {
+		seen[selector] = true
+		selectors = append(selectors, selector)
+	}
+	for selector := range darkRules {
+		if !seen[selector] {
+			selectors = append(selectors, selector)
+		}
+	}
+	sort.Strings(selectors)
+
+	lightFallback := lightRules[".chroma"].color
+	if lightFallback == "" {
+		lightFallback = "#1f2328"
+	}
+	darkFallback := darkRules[".chroma"].color
+	if darkFallback == "" {
+		darkFallback = "#e6edf3"
+	}
+	var tokens, lightVariables, darkVariables strings.Builder
+	for _, selector := range selectors {
+		lightRule := lightRules[selector]
+		darkRule := darkRules[selector]
+		hasColor := lightRule.color != "" || darkRule.color != ""
+		if !hasColor {
+			continue
+		}
+		variable := "--chroma-" + strings.Trim(cssVarPattern.ReplaceAllString(selector, "-"), "-")
+		tokens.WriteString(selector)
+		tokens.WriteString(" {")
+		tokens.WriteString(" color: var(")
+		tokens.WriteString(variable)
+		tokens.WriteString(");")
+		lightColor := lightRule.color
+		if lightColor == "" {
+			lightColor = lightFallback
+		}
+		darkColor := darkRule.color
+		if darkColor == "" {
+			darkColor = darkFallback
+		}
+		fmt.Fprintf(&lightVariables, " %s: %s;", variable, lightColor)
+		fmt.Fprintf(&darkVariables, " %s: %s;", variable, darkColor)
+		tokens.WriteString(" }\n")
+	}
+	return ChromaTheme{
+		TokenCSS:       template.CSS(tokens.String()),
+		LightVariables: template.CSS(lightVariables.String()),
+		DarkVariables:  template.CSS(darkVariables.String()),
+		LightRules:     template.CSS(renderChromaDeclarations(lightRules)),
+		DarkRules:      template.CSS(renderChromaDeclarations(darkRules)),
+	}
+}
+
+func renderChromaDeclarations(rules map[string]chromaRule) string {
+	selectors := make([]string, 0, len(rules))
+	for selector, rule := range rules {
+		if len(rule.declarations) > 0 {
+			selectors = append(selectors, selector)
+		}
+	}
+	sort.Strings(selectors)
+	var output strings.Builder
+	for _, selector := range selectors {
+		output.WriteString(selector)
+		output.WriteString(" {")
+		for _, declaration := range rules[selector].declarations {
+			output.WriteByte(' ')
+			output.WriteString(declaration)
+			output.WriteByte(';')
+		}
+		output.WriteString(" }\n")
+	}
+	return output.String()
+}
+
+func parseChromaRules(css string) map[string]chromaRule {
+	rules := map[string]chromaRule{}
+	for _, match := range cssRulePattern.FindAllStringSubmatch(css, -1) {
+		selector := strings.TrimSpace(match[1])
+		rule := chromaRule{}
+		for _, rawDeclaration := range strings.Split(match[2], ";") {
+			name, value, ok := strings.Cut(rawDeclaration, ":")
+			if !ok {
+				continue
+			}
+			name = strings.TrimSpace(name)
+			value = strings.TrimSpace(value)
+			switch name {
+			case "background", "background-color":
+				continue
+			case "color":
+				rule.color = value
+			default:
+				if name != "" && value != "" {
+					rule.declarations = append(rule.declarations, name+": "+value)
+				}
+			}
+		}
+		rules[selector] = rule
+	}
+	return rules
 }

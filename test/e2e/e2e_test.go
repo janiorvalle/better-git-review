@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -25,8 +26,12 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	binaryPath = filepath.Join(temp, "better-git-review")
-	command := exec.Command("go", "build", "-o", binaryPath, "../../cmd/better-git-review")
+	binaryName := "bgr"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath = filepath.Join(temp, binaryName)
+	command := exec.Command("go", "build", "-o", binaryPath, "../../cmd/bgr")
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	if err := command.Run(); err != nil {
@@ -479,6 +484,33 @@ func TestGitSources(t *testing.T) {
 	})
 }
 
+func TestDirtyReviewsOnlyUncommittedChanges(t *testing.T) {
+	repo := initializeRepo(t)
+	runGit(t, repo, "switch", "-c", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "committed.go"), []byte("package committed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "committed.go")
+	runGit(t, repo, "commit", "-m", "committed feature")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("dirty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	output := filepath.Join(t.TempDir(), "dirty.json")
+	result := runCLI(t, isolatedEnvironment(t), nil,
+		"-C", repo, "--dirty", "--provider", "mock", "--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	doc := readAndValidate(t, output)
+	if doc.Source.Range != "HEAD (uncommitted)" {
+		t.Fatalf("range = %q", doc.Source.Range)
+	}
+	if len(doc.Files) != 1 || doc.Files[0].Path != "base.txt" {
+		t.Fatalf("--dirty included committed branch changes: %#v", doc.Files)
+	}
+}
+
 func TestFailureModes(t *testing.T) {
 	t.Run("empty diff", func(t *testing.T) {
 		empty := filepath.Join(t.TempDir(), "empty.patch")
@@ -728,11 +760,13 @@ func isolatedEnvironment(t *testing.T) []string {
 	t.Helper()
 	root := t.TempDir()
 	env := removeEnv(os.Environ(),
-		"HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+		"HOME", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
 		"BGR_STAGE_BUDGET", "BGR_MOCK_FAIL_SUMMARY", "BGR_MOCK_PROMPT_LOG",
 	)
 	env = append(env,
 		"HOME="+root,
+		"APPDATA="+filepath.Join(root, "appdata"),
+		"LOCALAPPDATA="+filepath.Join(root, "localappdata"),
 		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),
 		"XDG_STATE_HOME="+filepath.Join(root, "state"),
 	)

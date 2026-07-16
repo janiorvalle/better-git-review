@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/janiorvalle/better-git-review/internal/config"
 )
@@ -25,25 +26,50 @@ type Selection struct {
 	Model    string
 }
 
+type Adapter interface {
+	Name() string
+	New(AdapterOptions) (Provider, string, error)
+}
+
+type AdapterOptions struct {
+	ModelOverride   string
+	ConfiguredModel string
+	APIKeyEnv       string
+	BaseURL         string
+	Getenv          func(string) string
+}
+
+type Registry struct {
+	adapters []Adapter
+}
+
+func NewRegistry(adapters ...Adapter) Registry {
+	return Registry{adapters: append([]Adapter(nil), adapters...)}
+}
+
 type SelectOptions struct {
 	Config        config.Config
 	ModelOverride string
+	Getenv        func(string) string
 }
 
-func Select(opts SelectOptions) (Selection, error) {
+func (r Registry) Select(opts SelectOptions) (Selection, error) {
+	if opts.Getenv == nil {
+		opts.Getenv = os.Getenv
+	}
 	if opts.Config.Provider != "" {
-		return selectNamed(opts.Config.Provider, opts)
+		return r.selectNamed(opts.Config.Provider, opts)
 	}
 
 	var probes []string
-	for _, name := range []string{"claude-cli", "codex-cli", "openrouter"} {
-		selection, err := selectNamed(name, opts)
+	for _, adapter := range r.adapters {
+		selection, err := r.selectNamed(adapter.Name(), opts)
 		if err != nil {
-			probes = append(probes, fmt.Sprintf("%s: %s", name, err))
+			probes = append(probes, fmt.Sprintf("%s: %s", adapter.Name(), err))
 			continue
 		}
 		available, detail := selection.Provider.Detect()
-		probes = append(probes, fmt.Sprintf("%s: %s", name, detail))
+		probes = append(probes, fmt.Sprintf("%s: %s", adapter.Name(), detail))
 		if available {
 			return selection, nil
 		}
@@ -54,43 +80,35 @@ func Select(opts SelectOptions) (Selection, error) {
 	)
 }
 
-func selectNamed(name string, opts SelectOptions) (Selection, error) {
+func (r Registry) selectNamed(name string, opts SelectOptions) (Selection, error) {
 	providerConfig := opts.Config.Providers[name]
-	switch name {
-	case "claude-cli":
-		model := chooseModel(opts.ModelOverride, providerConfig.Model, "sonnet")
-		return Selection{Provider: &ClaudeCLI{Model: model}, Model: model}, nil
-	case "codex-cli":
-		model := chooseModel(opts.ModelOverride, providerConfig.Model, "default")
-		return Selection{Provider: &CodexCLI{Model: model}, Model: model}, nil
-	case "openrouter":
-		model := chooseModel(opts.ModelOverride, providerConfig.Model, "anthropic/claude-sonnet-4.5")
-		keyEnv := defaultString(providerConfig.APIKeyEnv, "OPENROUTER_API_KEY")
-		baseURL := defaultString(providerConfig.BaseURL, "https://openrouter.ai/api/v1")
-		return Selection{
-			Provider: &OpenRouter{
-				Model:     model,
-				APIKeyEnv: keyEnv,
-				BaseURL:   baseURL,
-				Getenv:    os.Getenv,
-			},
-			Model: model,
-		}, nil
-	case "mock":
-		return Selection{Provider: &Mock{Getenv: os.Getenv}, Model: chooseModel(opts.ModelOverride, providerConfig.Model, "deterministic")}, nil
-	default:
-		return Selection{}, fmt.Errorf("unknown provider %q (supported: claude-cli, codex-cli, openrouter, mock)", name)
+	for _, adapter := range r.adapters {
+		if adapter.Name() != name {
+			continue
+		}
+		selected, model, err := adapter.New(AdapterOptions{
+			ModelOverride:   opts.ModelOverride,
+			ConfiguredModel: providerConfig.Model,
+			APIKeyEnv:       providerConfig.APIKeyEnv,
+			BaseURL:         providerConfig.BaseURL,
+			Getenv:          opts.Getenv,
+		})
+		if err != nil {
+			return Selection{}, err
+		}
+		return Selection{Provider: selected, Model: model}, nil
 	}
+	return Selection{}, fmt.Errorf("unknown provider %q (supported: %s)", name, strings.Join(r.Names(), ", "))
 }
 
-func chooseModel(override, configured, fallback string) string {
+func ChooseModel(override, configured, fallback string) string {
 	if override != "" {
 		return override
 	}
-	return defaultString(configured, fallback)
+	return DefaultString(configured, fallback)
 }
 
-func defaultString(value, fallback string) string {
+func DefaultString(value, fallback string) string {
 	if value == "" {
 		return fallback
 	}
@@ -106,4 +124,12 @@ func joinProbes(probes []string) string {
 		result += probe
 	}
 	return result
+}
+
+func (r Registry) Names() []string {
+	names := make([]string, 0, len(r.adapters))
+	for _, adapter := range r.adapters {
+		names = append(names, adapter.Name())
+	}
+	return names
 }

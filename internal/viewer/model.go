@@ -10,18 +10,21 @@ import (
 )
 
 type Page struct {
-	Title       string
-	Range       string
-	JSON        template.JS
-	ChromaLight template.CSS
-	ChromaDark  template.CSS
-	TotalFiles  int
-	Additions   int
-	Deletions   int
-	Mermaid     *string
-	Overview    string
-	Steps       []StepView
-	Files       []FileView
+	Title            string
+	Range            string
+	JSON             template.JS
+	ChromaTokens     template.CSS
+	ChromaLight      template.CSS
+	ChromaDark       template.CSS
+	ChromaLightRules template.CSS
+	ChromaDarkRules  template.CSS
+	TotalFiles       int
+	Additions        int
+	Deletions        int
+	Mermaid          *string
+	Overview         string
+	Steps            []StepView
+	Files            []FileView
 }
 
 type StepView struct {
@@ -64,24 +67,23 @@ func buildPage(doc document.Document) (Page, error) {
 		return Page{}, err
 	}
 	jsonIsland := strings.ReplaceAll(string(encoded), "<", `\u003c`)
-	lightCSS, err := ChromaCSS("github")
-	if err != nil {
-		return Page{}, err
-	}
-	darkCSS, err := ChromaCSS("github-dark")
+	chromaTheme, err := ChromaThemeCSS("github", "github-dark")
 	if err != nil {
 		return Page{}, err
 	}
 	page := Page{
-		Title:       firstNonEmpty(doc.Analysis.Title, doc.Source.Title),
-		Range:       doc.Source.Range,
-		JSON:        template.JS(jsonIsland),
-		ChromaLight: lightCSS,
-		ChromaDark:  darkCSS,
-		TotalFiles:  len(doc.Files),
-		Mermaid:     doc.Analysis.Mermaid,
-		Overview:    doc.Analysis.Overview,
-		Files:       make([]FileView, len(doc.Files)),
+		Title:            firstNonEmpty(doc.Analysis.Title, doc.Source.Title),
+		Range:            doc.Source.Range,
+		JSON:             template.JS(jsonIsland),
+		ChromaTokens:     chromaTheme.TokenCSS,
+		ChromaLight:      chromaTheme.LightVariables,
+		ChromaDark:       chromaTheme.DarkVariables,
+		ChromaLightRules: chromaTheme.LightRules,
+		ChromaDarkRules:  chromaTheme.DarkRules,
+		TotalFiles:       len(doc.Files),
+		Mermaid:          doc.Analysis.Mermaid,
+		Overview:         doc.Analysis.Overview,
+		Files:            make([]FileView, len(doc.Files)),
 	}
 	stubbedFiles := make(map[int]bool, len(doc.Analysis.StubbedFiles))
 	for _, fileIndex := range doc.Analysis.StubbedFiles {
@@ -145,5 +147,5 @@ func firstNonEmpty(values ...string) string {
 			return value
 		}
 	}
-	return "better-git-review"
+	return "bgr"
 }

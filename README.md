@@ -1,6 +1,6 @@
 # better-git-review
 
-`better-git-review` turns a pull request or unified diff into one guided HTML
+`bgr` turns a pull request or unified diff into one guided HTML
 walkthrough. Instead of presenting a flat wall of files, it groups related
 changes into ordered cohorts, explains the intent of each group, links
 dependencies, and renders the complete diff with GitHub-style syntax
@@ -13,18 +13,19 @@ The result is one portable HTML file that opens directly in a browser.
 
 Download the archive for your platform from
 [GitHub Releases](https://github.com/janiorvalle/better-git-review/releases),
-extract it, and place `better-git-review` on your `PATH`.
+extract it, and place `bgr` on your `PATH`. Archives also include the
+`better-git-review` long-name alias.
 
 You can also build the latest source with Go 1.24 or newer:
 
 ```sh
-go install github.com/janiorvalle/better-git-review/cmd/better-git-review@latest
+go install github.com/janiorvalle/better-git-review/cmd/bgr@latest
 ```
 
 Check the installed version:
 
 ```sh
-better-git-review --version
+bgr --version
 ```
 
 ## Quickstart
@@ -32,20 +33,26 @@ better-git-review --version
 Review the current branch against `main`:
 
 ```sh
-better-git-review --base main
+bgr --base main
+```
+
+Review only uncommitted changes, even when the branch also has commits:
+
+```sh
+bgr --dirty
 ```
 
 Review a GitHub pull request using the authenticated `gh` CLI:
 
 ```sh
-better-git-review 123
+bgr 123
 ```
 
 Review a patch file or standard input:
 
 ```sh
-better-git-review --diff change.patch
-git diff main...HEAD | better-git-review --diff -
+bgr --diff change.patch
+git diff main...HEAD | bgr --diff -
 ```
 
 HTML is the default output. Use `--open` to launch it after generation,
@@ -62,7 +69,7 @@ With no explicit configuration, providers are detected in this order:
 Install and authenticate the `claude` command, then run normally or select it:
 
 ```sh
-better-git-review --provider claude-cli --model sonnet --base main
+bgr --provider claude-cli --model sonnet --base main
 ```
 
 The CLI provider runs without tools or session persistence.
@@ -72,7 +79,7 @@ The CLI provider runs without tools or session persistence.
 Install and authenticate the `codex` command:
 
 ```sh
-better-git-review --provider codex-cli --base main
+bgr --provider codex-cli --base main
 ```
 
 The provider uses an isolated read-only workspace and disables host, network,
@@ -85,7 +92,7 @@ Set an API key and choose a model:
 
 ```sh
 export OPENROUTER_API_KEY=...
-better-git-review --provider openrouter \
+bgr --provider openrouter \
   --model anthropic/claude-sonnet-4.5 \
   --base main
 ```
@@ -95,11 +102,15 @@ OpenRouter uses structured JSON output and defaults to
 
 ## Configuration
 
-User configuration lives at:
+On macOS and Linux, user configuration lives at:
 
 ```text
 ~/.config/better-git-review/config.toml
 ```
+
+On Windows it uses `%APPDATA%\better-git-review\config.toml`; state and cache
+data use `%LOCALAPPDATA%\better-git-review`. Unix XDG and legacy paths are
+unchanged.
 
 Repositories may provide `.better-git-review.toml`. Repository values override
 user values, and CLI flags override both.
