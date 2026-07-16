@@ -1,0 +1,7 @@
+diff --git a/hostile.html b/hostile.html
+index 1111111..2222222 100644
+--- a/hostile.html
++++ b/hostile.html
+@@ -1 +1 @@ "></div><img src=x onerror=alert(2)>
+-safe
++</script><script>alert(1)</script>

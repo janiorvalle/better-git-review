@@ -1,8 +1,8 @@
 package document
 
 const (
-	SchemaVersion = 1
-	Generator     = "better-git-review v0.1.0"
+	SchemaVersion = 2
+	Generator     = "better-git-review v0.2.0"
 )
 
 var Layers = []string{"schema", "backend", "api", "ui", "tests", "config", "docs", "other"}
@@ -38,6 +38,12 @@ type File struct {
 type Hunk struct {
 	Header string     `json:"header"`
 	Lines  []HunkLine `json:"lines"`
+	Blame  *Blame     `json:"blame,omitempty"`
+}
+
+type Blame struct {
+	Author string `json:"author"`
+	Date   string `json:"date"`
 }
 
 type HunkLine struct {

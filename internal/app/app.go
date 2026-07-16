@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
 	"github.com/janiorvalle/better-git-review/internal/analyze"
+	"github.com/janiorvalle/better-git-review/internal/blame"
 	"github.com/janiorvalle/better-git-review/internal/cache"
 	"github.com/janiorvalle/better-git-review/internal/config"
 	"github.com/janiorvalle/better-git-review/internal/diff"
@@ -21,6 +24,7 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/guard"
 	"github.com/janiorvalle/better-git-review/internal/provider"
 	"github.com/janiorvalle/better-git-review/internal/source"
+	"github.com/janiorvalle/better-git-review/internal/viewer"
 )
 
 type Environment struct {
@@ -38,6 +42,8 @@ type options struct {
 	Provider        string
 	Model           string
 	Out             string
+	Format          string
+	Open            bool
 	NoCache         bool
 	Yes             bool
 	TrustRepoConfig bool
@@ -147,19 +153,39 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		}
 	}
 	logf(env.Stderr)("organized into %d cohort(s)", len(result.Analysis.Cohorts))
+	if opts.PR == "" && opts.DiffFile == "" {
+		if result.Source.Range == "HEAD (uncommitted)" {
+			blame.EnrichUncommitted(ctx, result.Source.RepoDir, result.Files, nil)
+		} else {
+			blame.Enrich(ctx, result.Source.RepoDir, result.Files, nil)
+		}
+	}
 
 	outputPath := opts.Out
 	if outputPath == "" {
-		outputPath = "walkthrough-" + collected.Source.Name + ".json"
+		outputPath = "walkthrough-" + collected.Source.Name + "." + opts.Format
 	}
 	outputPath, err = filepath.Abs(outputPath)
 	if err != nil {
 		return err
 	}
-	if err := writeDocument(outputPath, result); err != nil {
-		return err
+	if opts.Format == "json" {
+		if err := writeDocument(outputPath, result); err != nil {
+			return err
+		}
+	} else {
+		htmlOutput, renderErr := viewer.Render(result)
+		if renderErr != nil {
+			return renderErr
+		}
+		if err := writeOutput(outputPath, htmlOutput); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintf(env.Stderr, "\n  wrote %s\n", outputPath)
+	if opts.Open && opts.Format == "html" {
+		openBrowser(outputPath)
+	}
 	return nil
 }
 
@@ -183,7 +209,9 @@ func parseArgs(args []string, env Environment) (options, error) {
 	flags.StringVar(&result.RepoDir, "C", cwd, "repository directory")
 	flags.StringVar(&result.Provider, "provider", "", "analysis provider")
 	flags.StringVar(&result.Model, "model", "", "provider model")
-	flags.StringVar(&result.Out, "out", "", "output JSON path")
+	flags.StringVar(&result.Out, "out", "", "output path")
+	flags.StringVar(&result.Format, "format", "html", "output format: html or json")
+	flags.BoolVar(&result.Open, "open", false, "open generated HTML in the default browser")
 	flags.BoolVar(&result.NoCache, "no-cache", false, "bypass analysis cache")
 	flags.BoolVar(&result.Yes, "yes", false, "skip confirmations")
 	flags.BoolVar(&result.TrustRepoConfig, "trust-repo-config", false, "trust current repo provider config")
@@ -212,6 +240,9 @@ func parseArgs(args []string, env Environment) (options, error) {
 	if result.Base != "" && (result.PR != "" || result.DiffFile != "") {
 		return options{}, fmt.Errorf("--base cannot be used with PR_NUMBER or --diff")
 	}
+	if result.Format != "html" && result.Format != "json" {
+		return options{}, fmt.Errorf("--format must be html or json")
+	}
 	result.RepoDir, err = filepath.Abs(result.RepoDir)
 	if err != nil {
 		return options{}, err
@@ -229,13 +260,17 @@ func writeDocument(path string, value document.Document) error {
 	if err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".better-git-review-*.json")
+	return writeOutput(path, append(encoded, '\n'))
+}
+
+func writeOutput(path string, content []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), ".better-git-review-*")
 	if err != nil {
 		return fmt.Errorf("create output %q: %w", path, err)
 	}
 	tempName := temp.Name()
 	defer os.Remove(tempName)
-	if _, err := temp.Write(append(encoded, '\n')); err != nil {
+	if _, err := temp.Write(content); err != nil {
 		temp.Close()
 		return err
 	}
@@ -246,6 +281,19 @@ func writeDocument(path string, value document.Document) error {
 		return fmt.Errorf("write output %q: %w", path, err)
 	}
 	return nil
+}
+
+func openBrowser(path string) {
+	var command *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		command = exec.Command("open", path)
+	case "linux":
+		command = exec.Command("xdg-open", path)
+	default:
+		return
+	}
+	_ = command.Run()
 }
 
 func fillEnvironment(env Environment) Environment {
@@ -293,7 +341,9 @@ FLAGS
   -C <dir>               Repository directory (default: cwd)
   --provider <name>      Force claude-cli, codex-cli, openrouter, or mock
   --model <model>        Model override for the chosen provider
-  --out <file>           Output JSON path
+  --format html|json     Output format (default: html)
+  --out <file>           Output path
+  --open                 Open generated HTML in the default browser
   --no-cache             Bypass the analysis cache
   --yes                  Skip interactive confirmations
   --trust-repo-config    Trust the current repo provider config fingerprint

@@ -16,6 +16,9 @@ func TestParseArgsAllowsPRBeforeFlags(t *testing.T) {
 	if opts.PR != "123" || opts.Provider != "mock" || opts.Out != "result.json" {
 		t.Fatalf("unexpected options: %#v", opts)
 	}
+	if opts.Format != "html" {
+		t.Fatalf("default format = %q, want html", opts.Format)
+	}
 }
 
 func TestParseArgsRejectsConflictingSources(t *testing.T) {
@@ -31,5 +34,27 @@ func TestParseArgsRejectsConflictingSources(t *testing.T) {
 		}); err == nil {
 			t.Fatalf("expected conflicting args to fail: %#v", args)
 		}
+	}
+}
+
+func TestParseArgsAcceptsViewerFlags(t *testing.T) {
+	opts, err := parseArgs([]string{"--format", "json", "--open"}, Environment{
+		Stderr: &bytes.Buffer{},
+		Getwd:  func() (string, error) { return t.TempDir(), nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Format != "json" || !opts.Open {
+		t.Fatalf("unexpected viewer options: %#v", opts)
+	}
+}
+
+func TestParseArgsRejectsUnknownFormat(t *testing.T) {
+	if _, err := parseArgs([]string{"--format", "pdf"}, Environment{
+		Stderr: &bytes.Buffer{},
+		Getwd:  func() (string, error) { return t.TempDir(), nil },
+	}); err == nil {
+		t.Fatal("expected unknown format to fail")
 	}
 }
