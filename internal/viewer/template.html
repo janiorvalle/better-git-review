@@ -441,7 +441,8 @@ document.addEventListener("DOMContentLoaded", function () {
     next.dataset.stepTarget = String(current + 1);
     prev.querySelector(".pager-label").textContent = stepTitle(current - 1);
     next.querySelector(".pager-label").textContent = stepTitle(current + 1);
-    count.textContent = "Step " + (current + 1) + " of " + steps.length;
+    // Match the breadcrumb's cohort numbering: the Overview is not a step.
+    count.textContent = current === 0 ? "Overview" : "Step " + current + " of " + (steps.length - 1);
   }
   function go(index) {
     if (index < 0 || index >= steps.length) return;

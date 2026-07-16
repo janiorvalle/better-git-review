@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
@@ -185,7 +186,26 @@ func langChip(path string, binary bool) string {
 	if binary {
 		return "BIN"
 	}
+	// Extensions that are more specific than chroma's lexer name (chroma
+	// files .tsx under "TypeScript", losing information a reviewer wants).
 	ext := strings.TrimPrefix(filepath.Ext(path), ".")
+	switch strings.ToLower(ext) {
+	case "tsx", "jsx", "vue", "svelte":
+		return strings.ToUpper(ext)
+	}
+	// Otherwise ask chroma — it knows well-known filenames (Dockerfile,
+	// Makefile) that extension sniffing misses, and it is the same
+	// authority that picks the highlighting lexer.
+	if lexer := lexers.Match(filepath.Base(path)); lexer != nil {
+		name := lexer.Config().Name
+		if alias := chipAliases[name]; alias != "" {
+			return alias
+		}
+		if len(name) > 6 {
+			name = name[:6]
+		}
+		return strings.ToUpper(name)
+	}
 	if ext == "" {
 		return "TXT"
 	}
@@ -193,6 +213,18 @@ func langChip(path string, binary bool) string {
 		ext = ext[:5]
 	}
 	return strings.ToUpper(ext)
+}
+
+// chipAliases shortens chroma lexer names that would make clumsy chips.
+var chipAliases = map[string]string{
+	"Docker":        "DOCKER",
+	"Makefile":      "MAKE",
+	"TypeScript":    "TS",
+	"JavaScript":    "JS",
+	"Plaintext":     "TXT",
+	"markdown":      "MD",
+	"Base Makefile": "MAKE",
+	"TSX":           "TSX",
 }
 
 func joinIndexes(indexes []int) string {

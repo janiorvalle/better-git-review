@@ -87,9 +87,9 @@ func TestLangChip(t *testing.T) {
 		{"main.go", false, "GO"},
 		{"src/App.tsx", false, "TSX"},
 		{"a/b/SampleSecurityConfiguration.java", false, "JAVA"},
-		{"Makefile", false, "TXT"},
+		{"Makefile", false, "MAKE"},
 		{"image.png", true, "BIN"},
-		{"data.jsonlines", false, "JSONL"},
+		{"Dockerfile", false, "DOCKER"},
 	}
 	for _, testCase := range cases {
 		if got := langChip(testCase.path, testCase.binary); got != testCase.want {
