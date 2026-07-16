@@ -1,9 +1,12 @@
 package viewer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"path/filepath"
 	"strings"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
@@ -21,7 +24,9 @@ type Page struct {
 	TotalFiles       int
 	Additions        int
 	Deletions        int
-	Mermaid          *string
+	CohortCount      int
+	DocID            string
+	Diagram          template.HTML
 	Overview         string
 	Steps            []StepView
 	Files            []FileView
@@ -38,6 +43,7 @@ type StepView struct {
 	ReviewNotes  []string
 	Dependencies []DependencyView
 	FileIndexes  []int
+	FileList     string
 	FileCount    int
 	IsOverview   bool
 }
@@ -48,17 +54,22 @@ type DependencyView struct {
 }
 
 type FileView struct {
-	Index       int
-	Path        string
-	Status      string
-	Additions   int
-	Deletions   int
-	Binary      bool
-	Summary     string
-	Stubbed     bool
-	Collapsed   bool
-	UnifiedRows []UnifiedRow
-	SplitRows   []SplitRow
+	Index        int
+	Path         string
+	Status       string
+	Lang         string
+	Additions    int
+	Deletions    int
+	Binary       bool
+	Summary      string
+	Stubbed      bool
+	Collapsed    bool
+	StepPosition int
+	StepTotal    int
+	PrevFile     int
+	NextFile     int
+	UnifiedRows  []UnifiedRow
+	SplitRows    []SplitRow
 }
 
 func buildPage(doc document.Document) (Page, error) {
@@ -81,7 +92,8 @@ func buildPage(doc document.Document) (Page, error) {
 		ChromaLightRules: chromaTheme.LightRules,
 		ChromaDarkRules:  chromaTheme.DarkRules,
 		TotalFiles:       len(doc.Files),
-		Mermaid:          doc.Analysis.Mermaid,
+		CohortCount:      len(doc.Analysis.Cohorts),
+		DocID:            docID(doc),
 		Overview:         doc.Analysis.Overview,
 		Files:            make([]FileView, len(doc.Files)),
 	}
@@ -97,11 +109,14 @@ func buildPage(doc document.Document) (Page, error) {
 			Index:       index,
 			Path:        file.Path,
 			Status:      file.Status,
+			Lang:        langChip(file.Path, file.Binary),
 			Additions:   file.Additions,
 			Deletions:   file.Deletions,
 			Binary:      file.Binary,
 			Stubbed:     stubbedFiles[index],
 			Collapsed:   file.Additions+file.Deletions > 400,
+			PrevFile:    -1,
+			NextFile:    -1,
 			UnifiedRows: unified,
 			SplitRows:   split,
 		}
@@ -131,14 +146,61 @@ func buildPage(doc document.Document) (Page, error) {
 				})
 			}
 		}
-		for summaryIndex, fileIndex := range cohort.Files {
-			if fileIndex >= 0 && fileIndex < len(page.Files) && summaryIndex < len(cohort.FileSummaries) {
-				page.Files[fileIndex].Summary = cohort.FileSummaries[summaryIndex]
+		valid := make([]int, 0, len(cohort.Files))
+		for _, fileIndex := range cohort.Files {
+			if fileIndex >= 0 && fileIndex < len(page.Files) {
+				valid = append(valid, fileIndex)
 			}
 		}
+		for position, fileIndex := range valid {
+			if position < len(cohort.FileSummaries) {
+				page.Files[fileIndex].Summary = cohort.FileSummaries[position]
+			}
+			page.Files[fileIndex].StepPosition = position + 1
+			page.Files[fileIndex].StepTotal = len(valid)
+			if position > 0 {
+				page.Files[fileIndex].PrevFile = valid[position-1]
+			}
+			if position < len(valid)-1 {
+				page.Files[fileIndex].NextFile = valid[position+1]
+			}
+		}
+		step.FileList = joinIndexes(valid)
 		page.Steps = append(page.Steps, step)
 	}
+	page.Diagram = BuildDiagram(page.Steps)
 	return page, nil
+}
+
+func docID(doc document.Document) string {
+	hash := sha256.New()
+	fmt.Fprintf(hash, "%s\x00%d\x00", doc.Source.Range, doc.SchemaVersion)
+	for _, file := range doc.Files {
+		fmt.Fprintf(hash, "%s\x00%d\x00%d\x00", file.Path, file.Additions, file.Deletions)
+	}
+	return hex.EncodeToString(hash.Sum(nil))[:16]
+}
+
+func langChip(path string, binary bool) string {
+	if binary {
+		return "BIN"
+	}
+	ext := strings.TrimPrefix(filepath.Ext(path), ".")
+	if ext == "" {
+		return "TXT"
+	}
+	if len(ext) > 5 {
+		ext = ext[:5]
+	}
+	return strings.ToUpper(ext)
+}
+
+func joinIndexes(indexes []int) string {
+	parts := make([]string, len(indexes))
+	for position, value := range indexes {
+		parts[position] = fmt.Sprintf("%d", value)
+	}
+	return strings.Join(parts, ",")
 }
 
 func firstNonEmpty(values ...string) string {

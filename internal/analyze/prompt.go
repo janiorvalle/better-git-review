@@ -159,7 +159,6 @@ const analysisResponseInstructions = `Respond with ONLY a JSON object, with no m
 {
   "title": "short human title for the overall change",
   "overview": "2-4 sentence plain-language summary",
-  "mermaid": "small graph LR or graph TD diagram, or null",
   "cohorts": [{
     "title": "short cohort title",
     "layer": "schema | backend | api | ui | tests | config | docs | other",

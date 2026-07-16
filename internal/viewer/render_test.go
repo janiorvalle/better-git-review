@@ -10,7 +10,6 @@ import (
 
 func TestRenderEscapesHostileData(t *testing.T) {
 	hostile := `</script><script>alert(1)</script>"></div><img src=x onerror=alert(2)>`
-	diagram := "graph LR\nA --> B"
 	doc := document.Document{
 		SchemaVersion: document.SchemaVersion,
 		Source:        document.Source{Title: hostile, Range: hostile},
@@ -23,12 +22,21 @@ func TestRenderEscapesHostileData(t *testing.T) {
 			}},
 		}},
 		Analysis: document.Analysis{
-			Title: hostile, Overview: hostile, Mermaid: &diagram,
-			Cohorts: []document.Cohort{{
-				Title: hostile, Layer: "backend", Intent: hostile, Narrative: hostile,
-				Files: []int{0}, FileSummaries: []string{hostile},
-				ReviewNotes: []string{hostile}, DependsOn: []int{},
-			}},
+			Title: hostile, Overview: hostile,
+			Cohorts: []document.Cohort{
+				{
+					Title: hostile, Layer: "backend", Intent: hostile, Narrative: hostile,
+					Files: []int{0}, FileSummaries: []string{hostile},
+					ReviewNotes: []string{hostile}, DependsOn: []int{},
+				},
+				{
+					// Second cohort (with a dependency) forces the native SVG
+					// diagram to render hostile cohort titles too.
+					Title: hostile, Layer: "config", Intent: hostile, Narrative: hostile,
+					Files: []int{}, FileSummaries: []string{},
+					ReviewNotes: []string{}, DependsOn: []int{0},
+				},
+			},
 		},
 	}
 	output, err := Render(doc)
@@ -44,13 +52,11 @@ func TestRenderEscapesHostileData(t *testing.T) {
 	if strings.Contains(html, `<img src=x onerror`) {
 		t.Fatal("hostile image tag reached HTML unescaped")
 	}
-	if strings.Count(html, "<script") != 3 {
+	if strings.Count(html, "<script") != 2 {
 		t.Fatalf("unexpected script tags in output: %d", strings.Count(html, "<script"))
 	}
-	if !strings.Contains(html, `id="mermaid-script"`) ||
-		!strings.Contains(html, `mermaid.min.js" async`) ||
-		strings.Contains(html, `mermaid.min.js" defer`) {
-		t.Fatal("Mermaid must load without blocking viewer initialization")
+	if strings.Contains(html, "mermaid") {
+		t.Fatal("mermaid must be fully removed from the viewer")
 	}
 	island := extractIsland(t, html)
 	var decoded document.Document

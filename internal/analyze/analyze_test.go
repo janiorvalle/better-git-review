@@ -27,8 +27,8 @@ func (p *sequenceProvider) Complete(_ context.Context, prompt string) (string, e
 
 func TestRunRetriesOnceWithValidationErrors(t *testing.T) {
 	provider := &sequenceProvider{responses: []string{
-		`{"title":"bad","overview":"","mermaid":null,"cohorts":[]}`,
-		`{"title":"ok","overview":"done","mermaid":null,"cohorts":[{"title":"Backend","layer":"backend","intent":"x","narrative":"y","files":[0],"fileSummaries":["changed"],"reviewNotes":[],"dependsOn":[]}]}`,
+		`{"title":"bad","overview":"","cohorts":[]}`,
+		`{"title":"ok","overview":"done","cohorts":[{"title":"Backend","layer":"backend","intent":"x","narrative":"y","files":[0],"fileSummaries":["changed"],"reviewNotes":[],"dependsOn":[]}]}`,
 	}}
 	analysis, err := Run(context.Background(), Options{
 		Provider: provider,
@@ -120,7 +120,7 @@ func (p *structuredSequenceProvider) CompleteStructured(_ context.Context, _ str
 	if !json.Valid(schema) {
 		panic("invalid schema")
 	}
-	return json.RawMessage(`{"title":"ok","overview":"done","mermaid":null,"cohorts":[{"title":"Backend","layer":"backend","intent":"x","narrative":"y","files":[0],"fileSummaries":["changed"],"reviewNotes":[],"dependsOn":[]}]}`), nil
+	return json.RawMessage(`{"title":"ok","overview":"done","cohorts":[{"title":"Backend","layer":"backend","intent":"x","narrative":"y","files":[0],"fileSummaries":["changed"],"reviewNotes":[],"dependsOn":[]}]}`), nil
 }
 
 func TestRunUsesStructuredProvider(t *testing.T) {

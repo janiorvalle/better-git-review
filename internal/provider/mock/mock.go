@@ -103,16 +103,13 @@ func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
 	sort.SliceStable(cohorts, func(i, j int) bool {
 		return layerPosition(cohorts[i].Layer) < layerPosition(cohorts[j].Layer)
 	})
-	diagram := "graph LR\n  A[Mock mode] --> B[No LLM analysis]"
 	analysis := struct {
 		Title    string   `json:"title"`
 		Overview string   `json:"overview"`
-		Mermaid  *string  `json:"mermaid"`
 		Cohorts  []cohort `json:"cohorts"`
 	}{
 		Title:    "[MOCK] Guided review",
 		Overview: "Mock analysis: files were grouped by path heuristics only.",
-		Mermaid:  &diagram,
 		Cohorts:  cohorts,
 	}
 	encoded, err := json.Marshal(analysis)
