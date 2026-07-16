@@ -187,16 +187,32 @@ the code from being as extensible as the locked design claims:
 
 ## Part 4 — Dogfooding fixes (running list)
 
-26. **BUG: diff add/del backgrounds invisible in the code area.** Diagnosed:
-    chroma's generated CSS sets an opaque `background-color` on `.chroma`,
-    and every code `<td>` carries that class — it paints over the row's
-    translucent `--add-bg`/`--del-bg`, so only the line-number gutter tints.
-    Both themes affected. Fix: strip `background-color` from the generated
-    chroma CSS in `ChromaCSS()` (or override `.chroma { background:
-    transparent }`), and revisit the dark alphas (0.15/0.10 are barely
-    perceptible on `#0d1117` even once visible — CodeRabbit's reference
-    reads much stronger, with a solid left edge accent per changed line).
-    *Small enough to hotfix ahead of any gate.*
+26. **BUG: diff rendering theme defects** *(batched into M4 by owner)*.
+    Two related root causes, both diagnosed:
+    - *Invisible add/del backgrounds:* chroma's generated CSS sets an opaque
+      `background-color` on `.chroma`, and every code `<td>` carries that
+      class — it paints over the row's translucent `--add-bg`/`--del-bg`,
+      so only the line-number gutter tints. Fix: strip backgrounds from the
+      generated chroma CSS.
+    - *Near-black tokens in dark mode:* the light chroma stylesheet is
+      embedded globally with the dark one overlaid in a media query; token
+      classes the dark style doesn't fully override keep light-theme colors
+      (`#24292e`-family) on the `#0d1117` canvas. Fix: theme the token
+      palette via CSS custom properties (one set of token classes, two
+      variable blocks) or fully-scoped stylesheets with a unit test
+      asserting the dark sheet overrides every class the light sheet emits.
+    M4 scope is CORRECTNESS (right colors, visible backgrounds, GitHub-dark
+    parity per the owner's reference screenshots); aesthetic strengthening
+    (left-edge accents, alpha tuning, density) belongs to the M5 design
+    gate.
+
+32. **"Viewed" per-file toggle** *(pulled from the deferred list by owner)*.
+    GitHub-style checkbox in each file header; checking marks the file
+    reviewed and collapses it; state persists in `localStorage` keyed by
+    document identity + file path so a reopened walkthrough remembers
+    progress; sidebar/step shows reviewed-count progress. Assigned to the
+    **M5 design lane** (the file chrome is being redesigned there anyway —
+    building it twice across M4/M5 would be waste).
 
 *(more items land here as dogfooding continues)*
 
@@ -261,5 +277,9 @@ template structure).
 
 ## Remaining open questions
 
-1. #31 provider adapter subpackages — yes or defer?
-2. #26 hotfix timing — immediately, or batched into M4?
+*(none — all resolved)*
+
+Further locked answers (owner, 2026-07-16): #31 provider adapter
+subpackages — YES, adopt. #26 — batched into Gate M4, not hotfixed.
+Owner-supplied reference screenshots for #26/#32 (current-vs-GitHub dark
+diff, GitHub Viewed control): saved under `reference/`.
