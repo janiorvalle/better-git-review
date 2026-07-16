@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 )
 
 type ClaudeCLI struct {
 	Model string
-	Dir   string
 }
 
 func (p *ClaudeCLI) Name() string { return "claude-cli" }
@@ -23,7 +23,19 @@ func (p *ClaudeCLI) Detect() (bool, string) {
 }
 
 func (p *ClaudeCLI) Complete(ctx context.Context, prompt string) (string, error) {
-	output, err := runCommand(ctx, p.Dir, []byte(prompt), "claude", "-p", "--model", p.Model, "--output-format", "json")
+	isolatedDir, err := os.MkdirTemp("", "better-git-review-claude-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(isolatedDir)
+	output, err := runCommand(ctx, isolatedDir, []byte(prompt), "claude",
+		"-p",
+		"--safe-mode",
+		"--tools", "",
+		"--no-session-persistence",
+		"--model", p.Model,
+		"--output-format", "json",
+	)
 	if err != nil {
 		return "", err
 	}

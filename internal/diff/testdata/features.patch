@@ -47,3 +47,12 @@ index 6666666..7777777 100644
 @@ -1 +1 @@
 -before
 +after
+diff --git a/markers.txt b/markers.txt
+index 8888888..9999999 100644
+--- a/markers.txt
++++ b/markers.txt
+@@ -1,2 +1,2 @@
+---- deleted content
+-++++ deleted pluses
+++++ added content
++++++ added pluses

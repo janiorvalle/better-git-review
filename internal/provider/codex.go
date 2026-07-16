@@ -9,7 +9,6 @@ import (
 
 type CodexCLI struct {
 	Model string
-	Dir   string
 }
 
 func (p *CodexCLI) Name() string { return "codex-cli" }
@@ -23,6 +22,11 @@ func (p *CodexCLI) Detect() (bool, string) {
 }
 
 func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) {
+	isolatedDir, err := os.MkdirTemp("", "better-git-review-codex-workspace-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(isolatedDir)
 	temp, err := os.CreateTemp("", "better-git-review-codex-*.txt")
 	if err != nil {
 		return "", err
@@ -33,15 +37,21 @@ func (p *CodexCLI) Complete(ctx context.Context, prompt string) (string, error) 
 	}
 	defer os.Remove(outputPath)
 
-	args := []string{"exec", "--ephemeral", "--sandbox", "read-only", "--output-last-message", outputPath}
-	if p.Dir != "" {
-		args = append(args, "-C", p.Dir)
+	args := []string{
+		"exec",
+		"--ephemeral",
+		"--ignore-user-config",
+		"--ignore-rules",
+		"--skip-git-repo-check",
+		"--sandbox", "read-only",
+		"--output-last-message", outputPath,
+		"-C", isolatedDir,
 	}
 	if p.Model != "" && p.Model != "default" {
 		args = append(args, "--model", p.Model)
 	}
 	args = append(args, "-")
-	if _, err := runCommand(ctx, p.Dir, []byte(prompt), "codex", args...); err != nil {
+	if _, err := runCommand(ctx, isolatedDir, []byte(prompt), "codex", args...); err != nil {
 		return "", err
 	}
 	output, err := os.ReadFile(outputPath)

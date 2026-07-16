@@ -27,7 +27,6 @@ type Selection struct {
 
 type SelectOptions struct {
 	Config        config.Config
-	RepoDir       string
 	ModelOverride string
 }
 
@@ -60,10 +59,10 @@ func selectNamed(name string, opts SelectOptions) (Selection, error) {
 	switch name {
 	case "claude-cli":
 		model := chooseModel(opts.ModelOverride, providerConfig.Model, "sonnet")
-		return Selection{Provider: &ClaudeCLI{Model: model, Dir: opts.RepoDir}, Model: model}, nil
+		return Selection{Provider: &ClaudeCLI{Model: model}, Model: model}, nil
 	case "codex-cli":
 		model := chooseModel(opts.ModelOverride, providerConfig.Model, "default")
-		return Selection{Provider: &CodexCLI{Model: model, Dir: opts.RepoDir}, Model: model}, nil
+		return Selection{Provider: &CodexCLI{Model: model}, Model: model}, nil
 	case "openrouter":
 		model := chooseModel(opts.ModelOverride, providerConfig.Model, "anthropic/claude-sonnet-4-5")
 		keyEnv := defaultString(providerConfig.APIKeyEnv, "OPENROUTER_API_KEY")

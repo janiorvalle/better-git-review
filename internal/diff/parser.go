@@ -62,7 +62,7 @@ func Parse(text string) ([]document.File, error) {
 		case strings.HasPrefix(line, "Binary files "), line == "GIT binary patch":
 			file.Binary = true
 			continue
-		case isMetadataLine(line):
+		case hunk == nil && isMetadataLine(line):
 			continue
 		}
 

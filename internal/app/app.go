@@ -89,7 +89,6 @@ func Run(ctx context.Context, args []string, env Environment) error {
 
 	selection, err := provider.Select(provider.SelectOptions{
 		Config:        loadedConfig.Config,
-		RepoDir:       repoRoot,
 		ModelOverride: opts.Model,
 	})
 	if err != nil {
@@ -111,10 +110,13 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	var result document.Document
 	if !opts.NoCache {
 		if cached, ok := cacheStore.Load(cacheKey); ok {
-			logf(env.Stderr)("cache hit")
-			cached.Source = collected.Source
-			cached.Files = files
-			result = cached
+			if cached.Source.Title == collected.Source.Title &&
+				cached.Source.Description == collected.Source.Description {
+				logf(env.Stderr)("cache hit")
+				cached.Source = collected.Source
+				cached.Files = files
+				result = cached
+			}
 		}
 	}
 	if result.SchemaVersion == 0 {

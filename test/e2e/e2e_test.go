@@ -80,6 +80,40 @@ func TestCache(t *testing.T) {
 	}
 }
 
+func TestCacheRejectsChangedSourceContext(t *testing.T) {
+	env := isolatedEnvironment(t)
+	temp := t.TempDir()
+	firstPatch := filepath.Join(temp, "first.patch")
+	secondPatch := filepath.Join(temp, "second.patch")
+	data, err := os.ReadFile(fixturePath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(firstPatch, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPatch, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	firstOutput := filepath.Join(temp, "first.json")
+	secondOutput := filepath.Join(temp, "second.json")
+	first := runCLI(t, env, nil, "--diff", firstPatch, "--provider", "mock", "--out", firstOutput)
+	if first.err != nil {
+		t.Fatalf("first command failed: %v\n%s", first.err, first.stderr)
+	}
+	second := runCLI(t, env, nil, "--diff", secondPatch, "--provider", "mock", "--out", secondOutput)
+	if second.err != nil {
+		t.Fatalf("second command failed: %v\n%s", second.err, second.stderr)
+	}
+	doc := readAndValidate(t, secondOutput)
+	if doc.Meta.Cached || strings.Contains(second.stderr, "cache hit") {
+		t.Fatalf("changed source context reused stale analysis: %#v\n%s", doc.Meta, second.stderr)
+	}
+	if doc.Source.Title != "second.patch" {
+		t.Fatalf("source title = %q", doc.Source.Title)
+	}
+}
+
 func TestStdin(t *testing.T) {
 	env := isolatedEnvironment(t)
 	patch, err := os.ReadFile(fixturePath(t))
@@ -197,7 +231,7 @@ func TestClaudeProvider(t *testing.T) {
 		t.Skip("claude executable is not available")
 	}
 	output := filepath.Join(t.TempDir(), "claude.json")
-	ctxEnv := isolatedEnvironment(t)
+	ctxEnv := setEnv(os.Environ(), "XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
 	result := runCLIWithTimeout(t, 5*time.Minute, ctxEnv, nil,
 		"--diff", fixturePath(t), "--provider", "claude-cli", "--no-cache", "--out", output)
 	if result.err != nil {

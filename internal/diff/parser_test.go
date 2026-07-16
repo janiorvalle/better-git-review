@@ -15,8 +15,8 @@ func TestParseFeatureFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 7 {
-		t.Fatalf("got %d files, want 7", len(files))
+	if len(files) != 8 {
+		t.Fatalf("got %d files, want 8", len(files))
 	}
 
 	added := files[0]
@@ -61,6 +61,10 @@ func TestParseFeatureFixtures(t *testing.T) {
 	}
 	if files[6].Path != "file with spaces.txt" {
 		t.Fatalf("unquoted spaced path not parsed: %#v", files[6])
+	}
+	markers := files[7]
+	if markers.Additions != 2 || markers.Deletions != 2 || len(markers.Hunks[0].Lines) != 4 {
+		t.Fatalf("hunk content resembling metadata was dropped: %#v", markers)
 	}
 }
 

@@ -13,19 +13,23 @@ const (
 )
 
 func BuildPrompt(source document.Source, files []document.File) string {
-	perFileCap := totalPromptDiffCap / max(len(files), 1)
-	perFileCap = min(max(perFileCap, 256), maxFileDiffCap)
+	headers := make([]string, len(files))
+	headerBytes := 0
+	for index, file := range files {
+		headers[index] = fmt.Sprintf("\n===== FILE %d: %s (%s, +%d/-%d) =====\n",
+			index, file.Path, file.Status, file.Additions, file.Deletions)
+		headerBytes += len(headers[index])
+	}
+	bodyBudget := max(totalPromptDiffCap-headerBytes, 0)
+	perFileCap := bodyBudget / max(len(files), 1)
+	perFileCap = min(perFileCap, maxFileDiffCap)
 
 	var filesBlock strings.Builder
 	for index, file := range files {
-		fmt.Fprintf(&filesBlock, "\n===== FILE %d: %s (%s, +%d/-%d) =====\n",
-			index, file.Path, file.Status, file.Additions, file.Deletions)
+		filesBlock.WriteString(headers[index])
 		filesBlock.WriteString(fileDiffText(file, perFileCap))
 	}
 	filesText := filesBlock.String()
-	if len(filesText) > totalPromptDiffCap {
-		filesText = filesText[:totalPromptDiffCap] + "\n... [total diff truncated]\n"
-	}
 
 	description := ""
 	if source.Description != "" {
