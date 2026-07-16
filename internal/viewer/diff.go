@@ -192,8 +192,11 @@ func buildSplitLines(lines []document.HunkLine, pairs map[int]linePair, highligh
 				New:  cellForLine(line, highlighter, nil),
 			})
 		} else {
-			cell := cellForLine(line, highlighter, nil)
-			rows = append(rows, SplitRow{Kind: "line", Old: cell, New: cell})
+			oldCell := cellForLine(line, highlighter, nil)
+			newCell := oldCell
+			oldCell.Number = line.Old
+			newCell.Number = line.New
+			rows = append(rows, SplitRow{Kind: "line", Old: oldCell, New: newCell})
 		}
 		index++
 	}

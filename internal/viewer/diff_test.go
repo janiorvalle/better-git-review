@@ -47,6 +47,17 @@ func TestPairingMarksOverlapForUnequalBlocks(t *testing.T) {
 	}
 }
 
+func TestSplitContextUsesEachSideLineNumber(t *testing.T) {
+	rows := buildSplitLines(
+		[]document.HunkLine{{Type: "c", Old: 8, New: 10, Text: "context"}},
+		nil,
+		newHighlighter("main.go"),
+	)
+	if len(rows) != 1 || rows[0].Old.Number != 8 || rows[0].New.Number != 10 {
+		t.Fatalf("split context line numbers = %#v", rows)
+	}
+}
+
 func TestFoldingBoundary(t *testing.T) {
 	build := func(count int) []UnifiedRow {
 		rows := make([]UnifiedRow, count)
