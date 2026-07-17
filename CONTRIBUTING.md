@@ -1,5 +1,7 @@
 # Contributing
 
+Thanks for pitching in. Here's what you need to get going.
+
 ## Development Setup
 
 Requirements:
@@ -15,10 +17,11 @@ Clone the repository and run the deterministic suite:
 make verify
 ```
 
-`make verify` is the same local gate CI runs: build, vet, tests, GoReleaser
+`make verify` is the same gate CI runs: build, vet, tests, GoReleaser
 configuration validation, snapshot archives, and an installed-artifact smoke
-test. CI also runs `shellcheck` and exercises `install.sh` against a local
-GoReleaser snapshot, never a real release.
+test. If it's green locally, it should be green in CI — run it before
+opening a PR. CI also runs `shellcheck` and exercises `install.sh` against a
+local GoReleaser snapshot, never a real release.
 
 Tests must not depend on an LLM, network access, a user configuration file, or
 a populated cache. The mock provider is the default tool for end-to-end tests.
@@ -62,9 +65,12 @@ changed by the workflow itself.
 
 ## Writing A Provider
 
-Providers are deliberately small. The core owns prompt construction, untrusted
-data framing, JSON extraction and repair, schema validation, retries,
-seatbelts, staged analysis, caching, and rendering.
+This is the contribution we most hope you'll make, and it's deliberately
+small: a provider turns a prompt into text, and that's it. The core owns
+prompt construction, untrusted data framing, JSON extraction and repair,
+schema validation, retries, seatbelts, staged analysis, caching, and
+rendering — so a sloppy provider can't degrade output quality, and yours
+doesn't have to be heroic.
 
 Implement the three-method interface in `internal/provider`:
 
