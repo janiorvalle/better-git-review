@@ -291,6 +291,7 @@ button { font: inherit; }
 .file-summary { padding: 10px 14px; border-bottom: 1px solid var(--border-muted); color: var(--muted); font-size: 13.5px; line-height: 1.55; }
 .file-stub { padding: 8px 14px; border-bottom: 1px solid var(--note-border); background: var(--note-bg); color: var(--note-fg); font-size: 12px; font-weight: 600; }
 .file-mechanical { padding: 8px 14px; border-bottom: 1px solid var(--border-muted); background: var(--canvas-inset); color: var(--muted); font-size: 12px; font-weight: 600; }
+.bulk-render-note { padding: 6px 14px; border-bottom: 1px solid var(--border-muted); background: var(--canvas-inset); color: var(--muted); font-size: 11px; }
 .mechanical-list { max-width: 980px; margin: 0 0 22px; border: 1px solid var(--border-muted); background: var(--panel); border-radius: 8px; }
 .mechanical-list summary { cursor: pointer; padding: 10px 14px; color: var(--muted); font-weight: 600; }
 .mechanical-list ul { max-height: 280px; overflow: auto; margin: 0; padding: 0 14px 12px 34px; }
@@ -328,6 +329,7 @@ td.split-code.line-a { box-shadow: inset 3px 0 0 var(--add-edge); }
 td.split-code.line-d { box-shadow: inset 3px 0 0 var(--del-edge); }
 .line-a mark.word-change { background: var(--add-word); } .line-d mark.word-change { background: var(--del-word); }
 mark.word-change { color: inherit; border-radius: 3px; padding: 0 1px; }
+.long-line-note { display: inline-block; margin-right: 8px; color: var(--muted); font: 10px/17px var(--ui); opacity: .8; vertical-align: 1px; }
 .hunk-row td { background: var(--hunk-bg); color: var(--hunk-fg); padding: 5px 12px !important; font-size: 11.5px; font-weight: 500; }
 .blame-row td { border-top: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); background: var(--card-head); color: var(--muted); padding: 5px 12px !important; font: 11.5px/18px var(--ui); }
 .blame-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--accent-grad); vertical-align: -2px; margin-right: 6px; }
@@ -460,6 +462,9 @@ body[data-view="split"] .view-split { display: block; }
           {{if .Dependencies}}<div class="dependencies">{{range .Dependencies}}<button class="dependency-chip" type="button" data-step-target="{{.StepIndex}}">⛓ Depends on · {{.Title}}</button>{{end}}</div>{{end}}
           <div class="narrative">{{.Narrative}}</div>
           {{if .ReviewNotes}}<div class="review-notes"><h3>⚠ Worth double-checking</h3><ul>{{range .ReviewNotes}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
+          {{if $.ClientFileCards}}
+          <div class="file-list" data-client-files="{{.FileList}}"></div>
+          {{else}}
           {{range $position, $fileIndex := .FileIndexes}}{{$file := index $.Files $fileIndex}}
           <article class="file{{if $file.Collapsed}} collapsed{{end}}" data-file="{{$file.Index}}" id="file-{{$file.Index}}">
             <header class="file-header">
@@ -474,6 +479,7 @@ body[data-view="split"] .view-split { display: block; }
             {{if $file.Summary}}<div class="file-summary">{{$file.Summary}}</div>{{end}}
             {{if $file.Stubbed}}<div class="file-stub">No model summary - grouped from path only.</div>{{end}}
             {{if $file.Mechanical}}<div class="file-mechanical">Generated / auto-summarized - model analysis intentionally skipped.</div>{{end}}
+            <template class="file-body-template">
             <div class="file-body">
               {{if $file.Binary}}
                 {{if $file.ImagePreview}}<div class="binary-preview">
@@ -488,38 +494,30 @@ body[data-view="split"] .view-split { display: block; }
                   <div class="binary-story">{{$file.BinaryLabel}}</div>
                 </div>{{else}}<div class="binary">{{$file.BinaryLabel}}</div>{{end}}
               {{else}}
-              <div class="view-unified diff-scroll">
+              {{if $file.ClientRows}}
+              <div class="bulk-render-note">Large diff · plain-text rendering</div>
+              <div class="view-unified diff-scroll" data-unified-ready="false" aria-label="Unified diff for {{$file.Path}}"></div>
+              {{else}}
+              <div class="view-unified diff-scroll" data-unified-ready="true">
                 <table class="diff-table" aria-label="Unified diff for {{$file.Path}}">
                 <colgroup><col class="number-column"><col class="number-column"><col class="prefix-column"><col></colgroup>
                 <tbody>
                 {{range $row := $file.UnifiedRows}}
-                  {{if and $row.FoldCount $row.Hidden}}<tr class="fold-row" data-fold-control="{{$row.FoldID}}"><td colspan="4"><button type="button" class="fold-button" data-fold-target="{{$row.FoldID}}">↕ {{$row.FoldCount}} unmodified lines</button></td></tr>{{end}}
-                  {{if eq $row.Kind "hunk"}}<tr class="hunk-row"><td colspan="4">@@ {{$row.Header}}</td></tr>
-                  {{else if eq $row.Kind "blame"}}<tr class="blame-row"><td colspan="4"><span class="blame-dot" aria-hidden="true"></span><span class="blame-author">{{$row.Blame.Author}}</span> · {{$row.Blame.Date}}</td></tr>
-                  {{else}}<tr class="line-{{$row.Class}}{{if $row.Hidden}} fold-hidden{{end}}"{{if $row.Hidden}} data-fold-group="{{$row.FoldID}}"{{end}}><td class="line-number">{{if $row.Old}}{{$row.Old}}{{end}}</td><td class="line-number">{{if $row.New}}{{$row.New}}{{end}}</td><td class="line-prefix">{{$row.Prefix}}</td><td class="code chroma">{{$row.Code}}</td></tr>{{end}}
-                {{end}}
-                </tbody></table>
-              </div>
-              <div class="view-split diff-scroll">
-                <table class="diff-table split-table" aria-label="Split diff for {{$file.Path}}">
-                <colgroup><col class="split-number-column"><col class="split-code-column"><col class="split-number-column"><col class="split-code-column"></colgroup>
-                <tbody>
-                {{range $row := $file.SplitRows}}
-                  {{if and $row.FoldCount $row.Hidden}}<tr class="fold-row" data-fold-control="{{$row.FoldID}}"><td colspan="4"><button type="button" class="fold-button" data-fold-target="{{$row.FoldID}}">↕ {{$row.FoldCount}} unmodified lines</button></td></tr>{{end}}
-                  {{if eq $row.Kind "hunk"}}<tr class="hunk-row"><td colspan="4">@@ {{$row.Header}}</td></tr>
-                  {{else if eq $row.Kind "blame"}}<tr class="blame-row"><td colspan="4"><span class="blame-dot" aria-hidden="true"></span><span class="blame-author">{{$row.Blame.Author}}</span> · {{$row.Blame.Date}}</td></tr>
-                  {{else}}<tr{{if $row.Hidden}} class="fold-hidden" data-fold-group="{{$row.FoldID}}"{{end}}>
-                    <td class="line-number line-{{$row.Old.Class}}">{{if $row.Old.Number}}{{$row.Old.Number}}{{end}}</td>
-                    <td class="code chroma split-code line-{{$row.Old.Class}}{{if $row.Old.Placeholder}} placeholder{{end}}">{{$row.Old.Code}}</td>
-                    <td class="line-number line-{{$row.New.Class}}">{{if $row.New.Number}}{{$row.New.Number}}{{end}}</td>
-                    <td class="code chroma split-code line-{{$row.New.Class}}{{if $row.New.Placeholder}} placeholder{{end}}">{{$row.New.Code}}</td>
-                  </tr>{{end}}
+                  {{if and $row.FoldCount $row.Hidden}}<tr class="fold-row" data-row-kind="fold" data-fold-control="{{$row.FoldID}}"><td colspan="4"><button type="button" class="fold-button" data-fold-target="{{$row.FoldID}}">↕ {{$row.FoldCount}} unmodified lines</button></td></tr>{{end}}
+                  {{if eq $row.Kind "hunk"}}<tr class="hunk-row" data-row-kind="hunk"><td colspan="4">@@ {{$row.Header}}</td></tr>
+                  {{else if eq $row.Kind "blame"}}<tr class="blame-row" data-row-kind="blame"><td colspan="4"><span class="blame-dot" aria-hidden="true"></span><span class="blame-author">{{$row.Blame.Author}}</span> · {{$row.Blame.Date}}</td></tr>
+                  {{else}}<tr class="line-{{$row.Class}}{{if $row.Hidden}} fold-hidden{{end}}" data-row-kind="line" data-line-class="{{$row.Class}}" data-old="{{$row.Old}}" data-new="{{$row.New}}"{{if $row.LongLine}} data-long-line="true"{{end}}{{if $row.Hidden}} data-fold-group="{{$row.FoldID}}"{{end}}><td class="line-number">{{if $row.Old}}{{$row.Old}}{{end}}</td><td class="line-number">{{if $row.New}}{{$row.New}}{{end}}</td><td class="line-prefix">{{$row.Prefix}}</td><td class="code{{if not $row.LongLine}} chroma{{end}}">{{if $row.LongLine}}<span class="long-line-note">long line</span>{{end}}{{$row.Code}}</td></tr>{{end}}
                 {{end}}
                 </tbody></table>
               </div>
               {{end}}
+              <div class="view-split diff-scroll" data-split-ready="false"></div>
+              {{end}}
             </div>
+            </template>
+            <div class="file-body-slot"></div>
           </article>
+          {{end}}
           {{end}}
         {{end}}
         <div class="pager">
@@ -533,11 +531,31 @@ body[data-view="split"] .view-split { display: block; }
   </div>
 </div>
 <script id="walkthrough-data" type="application/json">{{.JSON}}</script>
+<script id="diff-data" type="application/json">{{.DiffJSON}}</script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   var steps = Array.from(document.querySelectorAll(".step"));
   var navButtons = Array.from(document.querySelectorAll(".step-nav-button"));
   var current = 0;
+  var viewerDocument = { files: [], analysis: { cohorts: [], stubbedFiles: [], mechanicalFiles: [] } };
+  var diffPayload = { f: [], u: [] };
+  try { viewerDocument = JSON.parse(document.getElementById("walkthrough-data").textContent || '{}'); } catch (_) {}
+  try { diffPayload = JSON.parse(document.getElementById("diff-data").textContent || '{"f":[],"u":[]}'); } catch (_) {}
+  var fileDetails = [];
+  (viewerDocument.analysis.cohorts || []).forEach(function (cohort) {
+    var indexes = cohort.files || [];
+    indexes.forEach(function (fileIndex, position) {
+      fileDetails[fileIndex] = {
+        summary: (cohort.fileSummaries || [])[position] || "",
+        position: position + 1,
+        total: indexes.length,
+        prev: position > 0 ? indexes[position - 1] : -1,
+        next: position < indexes.length - 1 ? indexes[position + 1] : -1
+      };
+    });
+  });
+  var stubbedFiles = new Set(viewerDocument.analysis.stubbedFiles || []);
+  var mechanicalFiles = new Set(viewerDocument.analysis.mechanicalFiles || []);
   var storedView = "unified";
   try { storedView = localStorage.getItem("better-git-review-view") || "unified"; } catch (_) {}
 
@@ -606,18 +624,342 @@ document.addEventListener("DOMContentLoaded", function () {
       button.classList.toggle("active", button.dataset.themeTarget === mode);
     });
   }
+  function makeElement(tag, className, text) {
+    var element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  }
+  function appendImagePane(container, asset, label) {
+    var pane = makeElement("div", "binary-pane");
+    if (asset) {
+      var wrap = makeElement("div", "binary-image-wrap");
+      var image = document.createElement("img");
+      image.src = asset[0];
+      image.alt = label + " image preview";
+      wrap.appendChild(image);
+      pane.appendChild(wrap);
+      var caption = label + " · " + (asset[1] || "");
+      if (asset[2]) caption += " · " + asset[2] + " px";
+      pane.appendChild(makeElement("div", "binary-caption", caption));
+    } else {
+      pane.appendChild(makeElement("div", "binary-missing", label === "Before" ? "No previous image" : "No new image"));
+      pane.appendChild(makeElement("div", "binary-caption", label));
+    }
+    container.appendChild(pane);
+  }
+  function makeClientBody(fileData, uiData) {
+    var bodyTemplate = makeElement("template", "file-body-template");
+    var body = makeElement("div", "file-body");
+    if (fileData.binary) {
+      if (uiData[2] || uiData[3]) {
+        var preview = makeElement("div", "binary-preview");
+        appendImagePane(preview, uiData[2], "Before");
+        appendImagePane(preview, uiData[3], "After");
+        preview.appendChild(makeElement("div", "binary-story", uiData[1] || "Binary image"));
+        body.appendChild(preview);
+      } else {
+        body.appendChild(makeElement("div", "binary", uiData[1] || "Binary file"));
+      }
+    } else {
+      body.appendChild(makeElement("div", "bulk-render-note", "Large diff · plain-text rendering"));
+      var unified = makeElement("div", "view-unified diff-scroll");
+      unified.dataset.unifiedReady = "false";
+      unified.setAttribute("aria-label", "Unified diff for " + fileData.path);
+      body.appendChild(unified);
+      var split = makeElement("div", "view-split diff-scroll");
+      split.dataset.splitReady = "false";
+      body.appendChild(split);
+    }
+    bodyTemplate.content.appendChild(body);
+    return bodyTemplate;
+  }
+  function makeFileStepper(details) {
+    var stepper = makeElement("span", "file-stepper");
+    var previous = makeElement("button", "", "‹");
+    previous.type = "button";
+    previous.dataset.fileJump = String(details.prev);
+    previous.disabled = details.prev < 0;
+    previous.setAttribute("aria-label", "Previous file");
+    var next = makeElement("button", "", "›");
+    next.type = "button";
+    next.dataset.fileJump = String(details.next);
+    next.disabled = details.next < 0;
+    next.setAttribute("aria-label", "Next file");
+    stepper.append(previous, document.createTextNode(" File "), makeElement("b", "", String(details.position)),
+      document.createTextNode(" of "), makeElement("b", "", String(details.total)), document.createTextNode(" "), next);
+    return stepper;
+  }
+  function makeClientFile(fileIndex) {
+    var fileData = viewerDocument.files[fileIndex] || {};
+    var details = fileDetails[fileIndex] || { summary: "", position: 1, total: 1, prev: -1, next: -1 };
+    var uiData = diffPayload.u[fileIndex] || ["TXT", "Binary file", null, null];
+    var card = makeElement("article", "file");
+    if ((fileData.additions || 0) + (fileData.deletions || 0) > 400) card.classList.add("collapsed");
+    card.dataset.file = String(fileIndex);
+    card.id = "file-" + fileIndex;
+    var header = makeElement("header", "file-header");
+    var toggle = makeElement("button", "file-toggle", "▼");
+    toggle.type = "button";
+    toggle.setAttribute("aria-label", "Toggle " + (fileData.path || ""));
+    toggle.setAttribute("aria-expanded", String(!card.classList.contains("collapsed")));
+    header.append(toggle, makeElement("span", "lang-chip", uiData[0] || "TXT"),
+      makeElement("div", "file-path", fileData.path || ""),
+      makeElement("span", "status-tag", fileData.status || ""));
+    var stats = makeElement("span", "file-stat");
+    stats.append(makeElement("span", "plus", "+" + (fileData.additions || 0)),
+      document.createTextNode(" "), makeElement("span", "minus", "−" + (fileData.deletions || 0)));
+    header.appendChild(stats);
+    if (details.total > 1) header.appendChild(makeFileStepper(details));
+    var viewedButton = makeElement("button", "viewed-switch");
+    viewedButton.type = "button";
+    viewedButton.dataset.viewedFile = String(fileIndex);
+    viewedButton.setAttribute("role", "switch");
+    viewedButton.setAttribute("aria-checked", "false");
+    var track = makeElement("span", "track");
+    track.setAttribute("aria-hidden", "true");
+    viewedButton.append(track, document.createTextNode("Viewed"));
+    header.appendChild(viewedButton);
+    card.appendChild(header);
+    if (details.summary) card.appendChild(makeElement("div", "file-summary", details.summary));
+    if (stubbedFiles.has(fileIndex)) card.appendChild(makeElement("div", "file-stub", "No model summary - grouped from path only."));
+    if (mechanicalFiles.has(fileIndex)) card.appendChild(makeElement("div", "file-mechanical", "Generated / auto-summarized - model analysis intentionally skipped."));
+    card.append(makeClientBody(fileData, uiData), makeElement("div", "file-body-slot"));
+    return card;
+  }
+  function ensureStepFiles(section) {
+    var list = section.querySelector(".file-list[data-client-files]");
+    if (!list || list.dataset.ready === "true") return;
+    var indexes = (list.dataset.clientFiles || "").split(",").filter(Boolean).map(Number);
+    var fragment = document.createDocumentFragment();
+    indexes.forEach(function (fileIndex) { fragment.appendChild(makeClientFile(fileIndex)); });
+    list.appendChild(fragment);
+    list.dataset.ready = "true";
+  }
+  function appendUnifiedSpecial(body, className, kind, content) {
+    var row = document.createElement("tr");
+    var cell = document.createElement("td");
+    row.className = className;
+    row.dataset.rowKind = kind;
+    cell.colSpan = 4;
+    if (typeof content === "string") {
+      cell.textContent = content;
+    } else {
+      cell.appendChild(content);
+    }
+    row.appendChild(cell);
+    body.appendChild(row);
+  }
+  function appendFoldControl(body, foldId, count) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "fold-button";
+    button.dataset.foldTarget = foldId;
+    button.textContent = "↕ " + count + " unmodified lines";
+    var row = document.createElement("tr");
+    var cell = document.createElement("td");
+    row.className = "fold-row";
+    row.dataset.rowKind = "fold";
+    row.dataset.foldControl = foldId;
+    cell.colSpan = 4;
+    cell.appendChild(button);
+    row.appendChild(cell);
+    body.appendChild(row);
+  }
+  function appendUnifiedLine(body, line, foldId, hidden) {
+    var lineClass = line[0] || "c";
+    var row = document.createElement("tr");
+    row.className = "line-" + lineClass + (hidden ? " fold-hidden" : "");
+    row.dataset.rowKind = "line";
+    row.dataset.lineClass = lineClass;
+    row.dataset.old = String(line[1] || 0);
+    row.dataset.new = String(line[2] || 0);
+    if (hidden) row.dataset.foldGroup = foldId;
+    if (line[4]) row.dataset.longLine = "true";
+    var oldNumber = document.createElement("td");
+    var newNumber = document.createElement("td");
+    var prefix = document.createElement("td");
+    var code = document.createElement("td");
+    oldNumber.className = "line-number";
+    newNumber.className = "line-number";
+    prefix.className = "line-prefix";
+    code.className = "code";
+    if (line[1]) oldNumber.textContent = String(line[1]);
+    if (line[2]) newNumber.textContent = String(line[2]);
+    prefix.textContent = lineClass === "a" ? "+" : lineClass === "d" ? "-" : " ";
+    if (line[4]) {
+      var note = document.createElement("span");
+      note.className = "long-line-note";
+      note.textContent = "long line";
+      code.appendChild(note);
+    }
+    code.appendChild(document.createTextNode(line[3] || ""));
+    row.append(oldNumber, newNumber, prefix, code);
+    body.appendChild(row);
+  }
+  function ensureUnified(file) {
+    if (!file) return;
+    var unified = file.querySelector(".view-unified");
+    if (!unified || unified.dataset.unifiedReady === "true") return;
+    var fileIndex = Number(file.dataset.file);
+    var hunks = diffPayload.f[fileIndex] || [];
+    var table = document.createElement("table");
+    table.className = "diff-table";
+    table.setAttribute("aria-label", unified.getAttribute("aria-label") || "Unified diff");
+    table.innerHTML = '<colgroup><col class="number-column"><col class="number-column"><col class="prefix-column"><col></colgroup><tbody></tbody>';
+    var body = table.querySelector("tbody");
+    hunks.forEach(function (hunk, hunkIndex) {
+      if (hunk[1] || hunk[2]) {
+        var blame = document.createDocumentFragment();
+        var dot = document.createElement("span");
+        var author = document.createElement("span");
+        dot.className = "blame-dot";
+        dot.setAttribute("aria-hidden", "true");
+        author.className = "blame-author";
+        author.textContent = hunk[1] || "";
+        blame.append(dot, author, document.createTextNode(" · " + (hunk[2] || "")));
+        appendUnifiedSpecial(body, "blame-row", "blame", blame);
+      }
+      appendUnifiedSpecial(body, "hunk-row", "hunk", "@@ " + (hunk[0] || ""));
+      var lines = hunk[3] || [];
+      var hidden = new Set();
+      var foldStarts = new Map();
+      for (var start = 0; start < lines.length;) {
+        if (lines[start][0] !== "c") {
+          start++;
+          continue;
+        }
+        var end = start;
+        while (end < lines.length && lines[end][0] === "c") end++;
+        if (end - start > 10) {
+          var foldStart = start + 3;
+          var foldEnd = end - 3;
+          foldStarts.set(foldStart, foldEnd - foldStart);
+          for (var hiddenIndex = foldStart; hiddenIndex < foldEnd; hiddenIndex++) hidden.add(hiddenIndex);
+        }
+        start = end;
+      }
+      var foldId = "u-" + fileIndex + "-" + hunkIndex;
+      lines.forEach(function (line, lineIndex) {
+        if (foldStarts.has(lineIndex)) appendFoldControl(body, foldId, foldStarts.get(lineIndex));
+        appendUnifiedLine(body, line, foldId, hidden.has(lineIndex));
+      });
+    });
+    unified.appendChild(table);
+    unified.dataset.unifiedReady = "true";
+  }
+  function appendSplitSide(row, source, side) {
+    var number = document.createElement("td");
+    var code = document.createElement("td");
+    number.className = "line-number";
+    code.className = "code split-code";
+    if (!source) {
+      code.classList.add("placeholder");
+      row.append(number, code);
+      return;
+    }
+    var lineClass = source.dataset.lineClass || "c";
+    number.classList.add("line-" + lineClass);
+    code.classList.add("line-" + lineClass);
+    if (source.dataset.longLine !== "true") code.classList.add("chroma");
+    var value = side === "old" ? source.dataset.old : source.dataset.new;
+    if (value && value !== "0") number.textContent = value;
+    var unifiedCode = source.querySelector(".code");
+    if (unifiedCode) code.innerHTML = unifiedCode.innerHTML;
+    row.append(number, code);
+  }
+  function appendSplitLine(body, oldRow, newRow) {
+    var row = document.createElement("tr");
+    var folded = oldRow || newRow;
+    if (folded && folded.classList.contains("fold-hidden")) {
+      row.classList.add("fold-hidden");
+      row.dataset.foldGroup = folded.dataset.foldGroup || "";
+    }
+    appendSplitSide(row, oldRow, "old");
+    appendSplitSide(row, newRow, "new");
+    body.appendChild(row);
+  }
+  function ensureSplit(file) {
+    if (!file || file.dataset.stamped !== "true") return;
+    ensureUnified(file);
+    var split = file.querySelector(".view-split");
+    var unified = file.querySelector(".view-unified");
+    if (!split || !unified || split.dataset.splitReady === "true") return;
+    var table = document.createElement("table");
+    table.className = "diff-table split-table";
+    table.setAttribute("aria-label", (unified.querySelector("table").getAttribute("aria-label") || "Unified diff").replace("Unified", "Split"));
+    table.innerHTML = '<colgroup><col class="split-number-column"><col class="split-code-column"><col class="split-number-column"><col class="split-code-column"></colgroup><tbody></tbody>';
+    var body = table.querySelector("tbody");
+    var rows = Array.from(unified.querySelector("tbody").children);
+    for (var index = 0; index < rows.length;) {
+      var source = rows[index];
+      var kind = source.dataset.rowKind;
+      var lineClass = source.dataset.lineClass;
+      if (kind !== "line") {
+        body.appendChild(source.cloneNode(true));
+        index++;
+        continue;
+      }
+      if (lineClass === "d") {
+        var deletions = [];
+        var additions = [];
+        while (index < rows.length && rows[index].dataset.rowKind === "line" && rows[index].dataset.lineClass === "d") {
+          deletions.push(rows[index++]);
+        }
+        while (index < rows.length && rows[index].dataset.rowKind === "line" && rows[index].dataset.lineClass === "a") {
+          additions.push(rows[index++]);
+        }
+        var count = Math.max(deletions.length, additions.length);
+        for (var offset = 0; offset < count; offset++) {
+          appendSplitLine(body, deletions[offset] || null, additions[offset] || null);
+        }
+        continue;
+      }
+      if (lineClass === "a") {
+        appendSplitLine(body, null, source);
+      } else {
+        appendSplitLine(body, source, source);
+      }
+      index++;
+    }
+    split.appendChild(table);
+    split.dataset.splitReady = "true";
+  }
+  function stampFile(file) {
+    if (!file || file.dataset.stamped === "true") return;
+    var bodyTemplate = file.querySelector(".file-body-template");
+    var slot = file.querySelector(".file-body-slot");
+    if (!bodyTemplate || !slot) return;
+    slot.appendChild(bodyTemplate.content.cloneNode(true));
+    bodyTemplate.remove();
+    file.dataset.stamped = "true";
+    ensureUnified(file);
+    if (document.body.dataset.view === "split") ensureSplit(file);
+  }
+  function prepareStep(section) {
+    ensureStepFiles(section);
+    section.querySelectorAll(".file:not(.collapsed)").forEach(stampFile);
+    if (document.body.dataset.view === "split") {
+      section.querySelectorAll('.file[data-stamped="true"]').forEach(ensureSplit);
+    }
+  }
   function go(index) {
     if (index < 0 || index >= steps.length) return;
+    prepareStep(steps[index]);
     current = index;
     steps.forEach(function (step, i) { step.classList.toggle("active", i === current); });
     navButtons.forEach(function (button, i) { button.classList.toggle("active", i === current); });
     document.getElementById("step-counter").textContent = stepTitle(current);
     updatePager(steps[current]);
+    applyViewed();
     window.scrollTo({ top: 0, behavior: "auto" });
   }
   function setView(view) {
     if (view !== "split") view = "unified";
     document.body.dataset.view = view;
+    if (view === "split" && steps[current]) {
+      steps[current].querySelectorAll('.file[data-stamped="true"]').forEach(ensureSplit);
+    }
     document.querySelectorAll("[data-view-target]").forEach(function (button) {
       button.classList.toggle("active", button.dataset.viewTarget === view);
     });
@@ -633,7 +975,10 @@ document.addEventListener("DOMContentLoaded", function () {
       var card = viewedButton.closest(".file");
       if (viewed.has(fileIndex)) {
         viewed.delete(fileIndex);
-        if (card) card.classList.remove("collapsed");
+        if (card) {
+          stampFile(card);
+          card.classList.remove("collapsed");
+        }
       } else {
         viewed.add(fileIndex);
         if (card) card.classList.add("collapsed");
@@ -646,6 +991,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (jumpButton && !jumpButton.disabled) {
       var jump = document.getElementById("file-" + Number(jumpButton.dataset.fileJump));
       if (jump) {
+        stampFile(jump);
         jump.classList.remove("collapsed");
         jump.scrollIntoView({ behavior: "smooth", block: "start" });
       }
@@ -670,6 +1016,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var fileButton = target.closest(".file-toggle");
     if (fileButton) {
       var file = fileButton.closest(".file");
+      if (file.classList.contains("collapsed")) stampFile(file);
       file.classList.toggle("collapsed");
       fileButton.setAttribute("aria-expanded", String(!file.classList.contains("collapsed")));
       return;

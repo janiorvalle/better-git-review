@@ -183,15 +183,15 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		return err
 	}
 
-	content, err := renderStageWithSource(ctx, opts.Format, result, collected)
-	if err != nil {
-		return err
-	}
 	outputPath, err := outputPath(opts, collected.Source.Name)
 	if err != nil {
 		return err
 	}
-	if err := emitStage(outputPath, content); err != nil {
+	// Parsed hunk text owns its own backing string. Release the source bytes
+	// before rendering so monster patch inputs do not remain live alongside
+	// the complete HTML artifact.
+	collected.Diff = nil
+	if err := renderAndEmitStage(ctx, outputPath, opts.Format, result, collected); err != nil {
 		return err
 	}
 	opened := false
@@ -444,6 +444,28 @@ func emitStage(path string, content []byte) error {
 	return writeOutput(path, content)
 }
 
+func renderAndEmitStage(
+	ctx context.Context,
+	path, format string,
+	value document.Document,
+	collected source.Result,
+) error {
+	if format == "json" {
+		content, err := renderStageWithSource(ctx, format, value, collected)
+		if err != nil {
+			return err
+		}
+		return emitStage(path, content)
+	}
+	previews := media.Enrich(ctx, value.Files, media.Source{
+		RepoDir: collected.Source.RepoDir, BaseRef: collected.BaseRef,
+		HeadRef: collected.HeadRef, Dirty: collected.Dirty,
+	}, nil)
+	return writeOutputWith(path, func(output io.Writer) error {
+		return viewer.RenderToWithPreviews(output, value, previews)
+	})
+}
+
 func parseArgs(args []string, env Environment) (options, error) {
 	cwd, err := env.Getwd()
 	if err != nil {
@@ -586,13 +608,20 @@ func isPRNumber(value string) bool {
 }
 
 func writeOutput(path string, content []byte) error {
+	return writeOutputWith(path, func(output io.Writer) error {
+		_, err := output.Write(content)
+		return err
+	})
+}
+
+func writeOutputWith(path string, write func(io.Writer) error) error {
 	temp, err := os.CreateTemp(filepath.Dir(path), ".better-git-review-*")
 	if err != nil {
 		return fmt.Errorf("create output %q: %w", path, err)
 	}
 	tempName := temp.Name()
 	defer os.Remove(tempName)
-	if _, err := temp.Write(content); err != nil {
+	if err := write(temp); err != nil {
 		temp.Close()
 		return err
 	}

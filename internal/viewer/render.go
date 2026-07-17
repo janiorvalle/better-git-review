@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"html/template"
+	"io"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
 	"github.com/janiorvalle/better-git-review/internal/media"
@@ -20,13 +21,20 @@ func Render(doc document.Document) ([]byte, error) {
 }
 
 func RenderWithPreviews(doc document.Document, previews map[int]media.Preview) ([]byte, error) {
-	page, err := buildPageWithPreviews(doc, previews)
-	if err != nil {
+	var output bytes.Buffer
+	if err := RenderToWithPreviews(&output, doc, previews); err != nil {
 		return nil, err
 	}
-	var output bytes.Buffer
-	if err := viewerTemplate.Execute(&output, page); err != nil {
-		return nil, fmt.Errorf("render viewer: %w", err)
-	}
 	return output.Bytes(), nil
+}
+
+func RenderToWithPreviews(output io.Writer, doc document.Document, previews map[int]media.Preview) error {
+	page, err := buildPageWithPreviews(doc, previews)
+	if err != nil {
+		return err
+	}
+	if err := viewerTemplate.Execute(output, page); err != nil {
+		return fmt.Errorf("render viewer: %w", err)
+	}
+	return nil
 }

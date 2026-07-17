@@ -56,17 +56,6 @@ func TestPairingMarksOverlapForUnequalBlocks(t *testing.T) {
 	}
 }
 
-func TestSplitContextUsesEachSideLineNumber(t *testing.T) {
-	rows := buildSplitLines(
-		[]document.HunkLine{{Type: "c", Old: 8, New: 10, Text: "context"}},
-		nil,
-		newHighlighter("main.go"),
-	)
-	if len(rows) != 1 || rows[0].Old.Number != 8 || rows[0].New.Number != 10 {
-		t.Fatalf("split context line numbers = %#v", rows)
-	}
-}
-
 func TestFoldingBoundary(t *testing.T) {
 	build := func(count int) []UnifiedRow {
 		rows := make([]UnifiedRow, count)
@@ -123,7 +112,7 @@ func TestFoldingStaysWithinHunks(t *testing.T) {
 			{Header: "second", Lines: contextLines(100)},
 		},
 	}
-	unified, split := BuildRows(file, 3)
+	unified := BuildRows(file, 3)
 	unifiedIDs := map[string]bool{}
 	for _, row := range unified {
 		if row.FoldCount > 0 {
@@ -132,15 +121,6 @@ func TestFoldingStaysWithinHunks(t *testing.T) {
 	}
 	if len(unifiedIDs) != 2 || !unifiedIDs["u-3-0"] || !unifiedIDs["u-3-1"] {
 		t.Fatalf("unified folds crossed hunk boundaries: %#v", unifiedIDs)
-	}
-	ids := map[string]bool{}
-	for _, row := range split {
-		if row.FoldCount > 0 {
-			ids[row.FoldID] = true
-		}
-	}
-	if len(ids) != 2 || !ids["s-3-0"] || !ids["s-3-1"] {
-		t.Fatalf("split folds crossed hunk boundaries: %#v", ids)
 	}
 }
 
@@ -194,5 +174,42 @@ func TestChangedSpansIgnoresSharedIndentation(t *testing.T) {
 	newText := `                .antMatchers("/testEngine").permitAll() // Allow unauthenticated`
 	if _, _, changed := ChangedSpans(oldText, newText); changed {
 		t.Fatal("shared indentation must not defeat the similarity gate")
+	}
+}
+
+func TestLongLinesSkipPairingAndHighlighting(t *testing.T) {
+	oldText := strings.Repeat("a", LongLineThreshold+1)
+	newText := strings.Repeat("a", LongLineThreshold) + "b"
+	lines := []document.HunkLine{
+		{Type: "d", Old: 1, Text: oldText},
+		{Type: "a", New: 1, Text: newText},
+	}
+	if pairs := pairChangedLines(lines); len(pairs) != 0 {
+		t.Fatalf("long lines were word-diff paired: %#v", pairs)
+	}
+	rows := BuildRows(document.File{
+		Path:  "minified.js",
+		Hunks: []document.Hunk{{Lines: lines}},
+	}, 0)
+	for _, row := range rows {
+		if row.Kind != "line" {
+			continue
+		}
+		if !row.LongLine {
+			t.Fatal("long line was not annotated")
+		}
+		if strings.Contains(string(row.Code), "<span") || strings.Contains(string(row.Code), "<mark") {
+			t.Fatalf("long line was highlighted: %s", row.Code)
+		}
+	}
+}
+
+func TestLongLineThresholdIsExclusive(t *testing.T) {
+	atThreshold := strings.Repeat("x", LongLineThreshold)
+	if isLongLine(atThreshold) {
+		t.Fatal("line at threshold should still be highlighted")
+	}
+	if !isLongLine(atThreshold + "x") {
+		t.Fatal("line over threshold should use plain text")
 	}
 }

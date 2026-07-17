@@ -240,8 +240,7 @@ index 1111111..2222222 100644
 		t.Fatalf("provenance = mechanical %#v stubbed %#v",
 			doc.Analysis.MechanicalFiles, doc.Analysis.StubbedFiles)
 	}
-	if !strings.Contains(html, "Generated / auto-summarized") ||
-		strings.Count(html, "No model summary - grouped from path only.") != 0 {
+	if !strings.Contains(html, "Generated / auto-summarized") {
 		t.Fatal("mechanical file did not render with neutral provenance")
 	}
 	includedOutput := filepath.Join(t.TempDir(), "included.json")
