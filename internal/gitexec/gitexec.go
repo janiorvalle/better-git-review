@@ -53,6 +53,22 @@ func DiffArgs(target string) []string {
 	}
 }
 
+func RootDiffArgs(commit string) []string {
+	return []string{
+		"-c", "diff.mnemonicPrefix=false",
+		"diff-tree",
+		"--root",
+		"--no-commit-id",
+		"--patch",
+		"--no-ext-diff",
+		"--no-textconv",
+		"--no-color",
+		"--src-prefix=a/",
+		"--dst-prefix=b/",
+		commit,
+	}
+}
+
 func BlameArgs(ref, lineRange, path string) []string {
 	if ref == "" {
 		ref = "HEAD"

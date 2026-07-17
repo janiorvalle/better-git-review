@@ -50,6 +50,21 @@ func TestDetectExplainsMissingAndUnauthenticatedGH(t *testing.T) {
 	}
 }
 
+func TestMatchingRemoteUsesPRRepositoryInsteadOfOrigin(t *testing.T) {
+	runner := remoteRunner{outputs: map[string]string{
+		"remote":                  "origin\nupstream\n",
+		"remote get-url origin":   "git@github.com:contributor/project.git\n",
+		"remote get-url upstream": "https://github.com/acme/project.git\n",
+	}}
+	remote, err := matchingRemote(context.Background(), runner, "/repo", "https://github.com/acme/project/pull/42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remote != "upstream" {
+		t.Fatalf("remote = %q", remote)
+	}
+}
+
 type fakeResponse struct {
 	data []byte
 	err  error
@@ -59,6 +74,16 @@ type fakeRunner struct {
 	lookErr   error
 	responses []fakeResponse
 	calls     []string
+}
+
+type remoteRunner struct{ outputs map[string]string }
+
+func (r remoteRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+	key := strings.Join(args, " ")
+	if output, ok := r.outputs[key]; ok {
+		return []byte(output), nil
+	}
+	return nil, fmt.Errorf("unexpected call: %s", key)
 }
 
 func (f *fakeRunner) LookPath(string) (string, error) {

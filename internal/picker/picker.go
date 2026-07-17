@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/janiorvalle/better-git-review/internal/gitexec"
 	gitsource "github.com/janiorvalle/better-git-review/internal/source/git"
@@ -164,7 +165,7 @@ func render(output io.Writer, catalog Catalog, query string) []Item {
 	if query == "" {
 		fmt.Fprintln(output, "Review what?")
 	} else {
-		fmt.Fprintf(output, "Review what? (filter: %s)\n", query)
+		fmt.Fprintf(output, "Review what? (filter: %s)\n", safeTerminalText(query))
 	}
 	var flattened []Item
 	sections := []struct {
@@ -187,19 +188,31 @@ func render(output io.Writer, catalog Catalog, query string) []Item {
 		}
 		for _, item := range visible {
 			flattened = append(flattened, item)
-			fmt.Fprintf(output, "  %2d  %s\n", len(flattened), item.Label)
+			fmt.Fprintf(output, "  %2d  %s\n", len(flattened), safeTerminalText(item.Label))
 		}
 		if hidden := len(section.items) - len(visible); hidden > 0 {
 			fmt.Fprintf(output, "      ... %d more - type to filter\n", hidden)
 		}
 	}
 	for _, note := range catalog.Notes {
-		fmt.Fprintf(output, "\n%s\n", note)
+		fmt.Fprintf(output, "\n%s\n", safeTerminalText(note))
 	}
 	if len(flattened) == 0 {
 		fmt.Fprintln(output, "\nNo matches.")
 	}
 	return flattened
+}
+
+func safeTerminalText(value string) string {
+	var result strings.Builder
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			fmt.Fprintf(&result, "\\u{%x}", character)
+			continue
+		}
+		result.WriteRune(character)
+	}
+	return result.String()
 }
 
 func mapSelection(item Item) Selection {

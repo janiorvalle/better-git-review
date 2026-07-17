@@ -18,15 +18,19 @@ func (Adapter) Name() string {
 }
 
 func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, string, []string, error) {
+	return newWithEffortSupport(opts, supportsEffort())
+}
+
+func newWithEffortSupport(opts provider.AdapterOptions, effortSupported bool) (provider.Provider, string, string, []string, error) {
 	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "sonnet")
 	reasoning := provider.ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "")
 	if err := provider.ValidateReasoning("claude-cli", reasoning, claudeReasoningLevels...); err != nil {
 		return nil, "", "", nil, err
 	}
-	effortSupported := supportsEffort()
 	warnings := []string(nil)
 	if reasoning != "" && !effortSupported {
 		warnings = append(warnings, "installed claude-cli does not support --effort; continuing without applying reasoning")
+		reasoning = ""
 	}
 	return &CLI{Model: model, Reasoning: reasoning, EffortSupported: effortSupported}, model, reasoning, warnings, nil
 }

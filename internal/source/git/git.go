@@ -51,13 +51,20 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		rangeText = "HEAD (uncommitted)"
 		base, head = "HEAD", "WORKTREE"
 	} else if opts.Commit != "" {
-		base = opts.Commit + "^"
 		head = opts.Commit
-		rangeText = base + ".." + head
+		rangeText = opts.Commit + "^.." + head
 		opts.Logf("diffing commit %s in %s ...", opts.Commit, opts.RepoDir)
-		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(rangeText)...)
+		parent, parentErr := runner.Run(ctx, opts.RepoDir, "rev-parse", "--verify", "--quiet", opts.Commit+"^")
+		if parentErr == nil {
+			base = strings.TrimSpace(string(parent))
+			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(base+".."+head)...)
+		} else {
+			base = ""
+			rangeText = opts.Commit + " (root commit)"
+			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.RootDiffArgs(head)...)
+		}
 		if err != nil {
-			return source.Result{}, fmt.Errorf("git diff %s: %w", rangeText, err)
+			return source.Result{}, fmt.Errorf("git diff commit %s: %w", opts.Commit, err)
 		}
 	} else {
 		if base == "" {

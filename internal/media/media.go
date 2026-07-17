@@ -11,6 +11,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -49,6 +50,12 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 	if runner == nil {
 		runner = gitexec.ExecRunner{}
 	}
+	baseRef := source.BaseRef
+	if !source.Dirty && baseRef != "" && source.HeadRef != "" {
+		if merged, err := runner.Run(ctx, source.RepoDir, "merge-base", baseRef, source.HeadRef); err == nil {
+			baseRef = strings.TrimSpace(string(merged))
+		}
+	}
 	for index, file := range files {
 		if !file.Binary {
 			continue
@@ -62,7 +69,7 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 			result[index] = Preview{Image: imageFile, Label: label}
 			continue
 		}
-		oldAsset := loadGitAsset(ctx, source.RepoDir, source.BaseRef, file.OldPath, runner, imageFile)
+		oldAsset := loadGitAsset(ctx, source.RepoDir, baseRef, file.OldPath, runner, imageFile)
 		var newAsset *Asset
 		if source.Dirty {
 			newAsset = loadWorktreeAsset(source.RepoDir, file.NewPath, imageFile)
@@ -111,40 +118,64 @@ func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec
 }
 
 func loadWorktreeAsset(repoDir, path string, includeContent bool) *Asset {
-	fullPath, ok := safeWorktreePath(repoDir, path)
+	fullPath, pathInfo, ok := safeWorktreePath(repoDir, path)
 	if !ok {
 		return nil
 	}
-	info, err := os.Stat(fullPath)
-	if err != nil || !info.Mode().IsRegular() {
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(pathInfo, info) {
 		return nil
 	}
 	asset := &Asset{Size: info.Size(), SizeLabel: formatSize(info.Size())}
 	if !includeContent || info.Size() > MaxPreviewBytes {
 		return asset
 	}
-	content, err := os.ReadFile(fullPath)
-	if err != nil {
+	content, err := io.ReadAll(io.LimitReader(file, MaxPreviewBytes+1))
+	if err != nil || len(content) > MaxPreviewBytes || int64(len(content)) != info.Size() {
 		return asset
 	}
 	fillImage(asset, path, content)
 	return asset
 }
 
-func safeWorktreePath(repoDir, path string) (string, bool) {
-	root, err := filepath.Abs(repoDir)
+func safeWorktreePath(repoDir, path string) (string, os.FileInfo, bool) {
+	root, err := filepath.EvalSymlinks(repoDir)
 	if err != nil {
-		return "", false
+		return "", nil, false
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return "", nil, false
 	}
 	full, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(path)))
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
 	relative, err := filepath.Rel(root, full)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", false
+		return "", nil, false
 	}
-	return full, true
+	current := root
+	var info os.FileInfo
+	for _, component := range strings.Split(relative, string(filepath.Separator)) {
+		if component == "" || component == "." {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, err = os.Lstat(current)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return "", nil, false
+		}
+	}
+	if info == nil || !info.Mode().IsRegular() {
+		return "", nil, false
+	}
+	return full, info, true
 }
 
 func fillImage(asset *Asset, path string, content []byte) {

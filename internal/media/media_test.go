@@ -7,6 +7,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,8 +27,25 @@ func TestImagePreviewUsesBaseAndHeadRefs(t *testing.T) {
 		t.Fatalf("preview = %#v", preview)
 	}
 	joined := strings.Join(runner.calls, "\n")
-	if !strings.Contains(joined, "base:old.png") || !strings.Contains(joined, "head:image.png") {
+	if !strings.Contains(joined, "merge:old.png") || !strings.Contains(joined, "head:image.png") {
 		t.Fatalf("blob refs were not selected correctly:\n%s", joined)
+	}
+}
+
+func TestDirtyPreviewRejectsSymlink(t *testing.T) {
+	repo := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.png")
+	if err := os.WriteFile(outside, testPNG(t, 1, 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(repo, "image.png")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	previews := Enrich(context.Background(), []document.File{{
+		Path: "image.png", OldPath: "image.png", NewPath: "image.png", Status: "modified", Binary: true,
+	}}, Source{RepoDir: repo, BaseRef: "HEAD", HeadRef: "WORKTREE", Dirty: true}, &assetRunner{content: testPNG(t, 1, 1)})
+	if previews[0].New != nil {
+		t.Fatalf("symlink content was loaded: %#v", previews[0].New)
 	}
 }
 
@@ -60,6 +79,9 @@ type assetRunner struct {
 
 func (r *assetRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
 	r.calls = append(r.calls, strings.Join(args, " "))
+	if len(args) >= 1 && args[0] == "merge-base" {
+		return []byte("merge\n"), nil
+	}
 	if len(args) >= 2 && args[0] == "cat-file" && args[1] == "-s" {
 		size := r.size
 		if size == 0 {

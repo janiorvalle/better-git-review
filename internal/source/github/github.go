@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -83,9 +84,9 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 	}
 	if fallbackOn != "" {
 		opts.Logf("%s; falling back to local git objects ...", fallbackOn)
-		diffBytes, err = s.localDiff(ctx, opts.RepoDir, meta.BaseRefOID, meta.HeadRefOID)
+		diffBytes, err = s.localDiff(ctx, opts.RepoDir, meta.URL, meta.BaseRefOID, meta.HeadRefOID)
 		if err != nil {
-			return source.Result{}, fmt.Errorf("%s; local-git fallback failed: %w. Run PR mode from a clone with an origin remote", fallbackOn, err)
+			return source.Result{}, fmt.Errorf("%s; local-git fallback failed: %w. Run PR mode from a clone with a remote matching the PR repository", fallbackOn, err)
 		}
 	}
 
@@ -127,7 +128,7 @@ func (s Source) diffWithRetry(ctx context.Context, runner Runner, opts source.Op
 	return nil, lastErr
 }
 
-func (s Source) localDiff(ctx context.Context, repoDir, baseOID, headOID string) ([]byte, error) {
+func (s Source) localDiff(ctx context.Context, repoDir, prURL, baseOID, headOID string) ([]byte, error) {
 	if baseOID == "" || headOID == "" {
 		return nil, fmt.Errorf("PR metadata did not include base/head object IDs")
 	}
@@ -138,14 +139,62 @@ func (s Source) localDiff(ctx context.Context, repoDir, baseOID, headOID string)
 	if _, err := runner.Run(ctx, repoDir, "rev-parse", "--is-inside-work-tree"); err != nil {
 		return nil, fmt.Errorf("%q is not a usable local git repository: %w", repoDir, err)
 	}
-	if _, err := runner.Run(ctx, repoDir, "fetch", "--no-tags", "origin", baseOID, headOID); err != nil {
-		return nil, fmt.Errorf("git fetch origin <PR object IDs>: %w", err)
+	remote, err := matchingRemote(ctx, runner, repoDir, prURL)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := runner.Run(ctx, repoDir, "fetch", "--no-tags", remote, baseOID, headOID); err != nil {
+		return nil, fmt.Errorf("git fetch %s <PR object IDs>: %w", remote, err)
 	}
 	diffBytes, err := runner.Run(ctx, repoDir, gitexec.DiffArgs(baseOID+"..."+headOID)...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff %s...%s: %w", baseOID, headOID, err)
 	}
 	return diffBytes, nil
+}
+
+func matchingRemote(ctx context.Context, runner gitexec.Runner, repoDir, prURL string) (string, error) {
+	remoteRaw, err := runner.Run(ctx, repoDir, "remote")
+	if err != nil {
+		return "", fmt.Errorf("list git remotes: %w", err)
+	}
+	remotes := strings.Fields(string(remoteRaw))
+	if len(remotes) == 0 {
+		return "", fmt.Errorf("local repository has no git remotes")
+	}
+	target := githubRepositorySlug(prURL)
+	if target != "" {
+		for _, remote := range remotes {
+			remoteURL, remoteErr := runner.Run(ctx, repoDir, "remote", "get-url", remote)
+			if remoteErr == nil && strings.EqualFold(githubRepositorySlug(strings.TrimSpace(string(remoteURL))), target) {
+				return remote, nil
+			}
+		}
+	}
+	if len(remotes) == 1 {
+		return remotes[0], nil
+	}
+	return "", fmt.Errorf("no git remote matches PR repository %q", target)
+}
+
+func githubRepositorySlug(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if marker := strings.Index(strings.ToLower(raw), "github.com:"); marker >= 0 {
+		return cleanRepositorySlug(raw[marker+len("github.com:"):])
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(parsed.Hostname(), "github.com") {
+		return ""
+	}
+	return cleanRepositorySlug(parsed.Path)
+}
+
+func cleanRepositorySlug(path string) string {
+	parts := strings.Split(strings.Trim(strings.TrimSuffix(path, ".git"), "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
 }
 
 func (s Source) commandRunner() Runner {

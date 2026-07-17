@@ -31,6 +31,14 @@ func TestRenderCapsSectionsAndMapsNumber(t *testing.T) {
 	}
 }
 
+func TestRenderEscapesTerminalControlSequences(t *testing.T) {
+	var output bytes.Buffer
+	render(&output, Catalog{Commits: []Item{{Label: "subject\x1b]52;c;YQ==\a", Command: "bgr --commit abc"}}}, "")
+	if strings.Contains(output.String(), "\x1b") || !strings.Contains(output.String(), `\u{1b}]52`) {
+		t.Fatalf("unsafe picker output: %q", output.String())
+	}
+}
+
 func TestRunSelectionAndQuit(t *testing.T) {
 	commands := &pickerCommands{lookErr: errors.New("missing")}
 	git := pickerGit{}

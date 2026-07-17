@@ -72,6 +72,27 @@ func TestCollectSupportsHeadAndCommitRanges(t *testing.T) {
 	}
 }
 
+func TestCollectSupportsRootCommit(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-b", "main")
+	runGitTest(t, repo, "config", "user.email", "source@example.com")
+	runGitTest(t, repo, "config", "user.name", "Source Test")
+	writeGitFile(t, repo, "root.txt", "root\n")
+	runGitTest(t, repo, "add", "root.txt")
+	runGitTest(t, repo, "commit", "-m", "root")
+	rootSHA := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+
+	result, err := (Source{}).Collect(context.Background(), source.Options{
+		RepoDir: repo, Commit: rootSHA, Logf: func(string, ...any) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BaseRef != "" || !strings.Contains(result.Source.Range, "root commit") || !strings.Contains(string(result.Diff), "root.txt") {
+		t.Fatalf("unexpected root result: %#v\n%s", result, result.Diff)
+	}
+}
+
 func writeGitFile(t *testing.T, repo, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o600); err != nil {
