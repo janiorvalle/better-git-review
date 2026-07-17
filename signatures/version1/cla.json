@@ -1,3 +1,12 @@
 {
-   "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "janiorvalle",
+      "id": 84532977,
+      "comment_id": 4998200409,
+      "created_at": "2026-07-17T01:48:47Z",
+      "repoId": 1302985444,
+      "pullRequestNo": 7
+    }
+  ]
 }
