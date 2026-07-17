@@ -44,7 +44,28 @@ base_url=${base_url%/}
 tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t bgr-install)
 stage_bgr=""
 stage_long=""
+dest_bgr="$install_dir/bgr"
+dest_long="$install_dir/better-git-review"
+backup_bgr="$tmp_dir/previous-bgr"
+backup_long="$tmp_dir/previous-better-git-review"
+had_bgr=false
+had_long=false
+transaction_active=false
+restore_install() {
+  transaction_active=false
+  if [ "$had_bgr" = true ]; then
+    mv -f "$backup_bgr" "$dest_bgr"
+  else
+    rm -f "$dest_bgr"
+  fi
+  if [ "$had_long" = true ]; then
+    mv -f "$backup_long" "$dest_long"
+  else
+    rm -f "$dest_long"
+  fi
+}
 cleanup() {
+  [ "$transaction_active" = false ] || restore_install
   rm -rf "$tmp_dir"
   [ -z "$stage_bgr" ] || rm -f "$stage_bgr"
   [ -z "$stage_long" ] || rm -f "$stage_long"
@@ -80,13 +101,23 @@ stage_bgr="$install_dir/.bgr.new.$$"
 stage_long="$install_dir/.better-git-review.new.$$"
 install -m 0755 "$tmp_dir/bgr" "$stage_bgr"
 install -m 0755 "$tmp_dir/better-git-review" "$stage_long"
-mv -f "$stage_bgr" "$install_dir/bgr"
+if [ -e "$dest_bgr" ] || [ -L "$dest_bgr" ]; then
+  cp -p "$dest_bgr" "$backup_bgr"
+  had_bgr=true
+fi
+if [ -e "$dest_long" ] || [ -L "$dest_long" ]; then
+  cp -p "$dest_long" "$backup_long"
+  had_long=true
+fi
+transaction_active=true
+mv -f "$stage_bgr" "$dest_bgr" || fail "could not replace bgr"
 stage_bgr=""
-mv -f "$stage_long" "$install_dir/better-git-review"
+mv -f "$stage_long" "$dest_long" || fail "could not replace better-git-review"
 stage_long=""
 
-"$install_dir/bgr" --version >/dev/null || fail "installed bgr failed its version smoke test"
-"$install_dir/better-git-review" --version >/dev/null || fail "installed better-git-review failed its version smoke test"
+"$dest_bgr" --version >/dev/null || fail "installed bgr failed its version smoke test"
+"$dest_long" --version >/dev/null || fail "installed better-git-review failed its version smoke test"
+transaction_active=false
 printf 'Installed bgr and better-git-review to %s\n' "$install_dir"
 case ":$PATH:" in
   *":$install_dir:"*) ;;

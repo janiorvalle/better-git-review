@@ -121,9 +121,6 @@ func Discover(ctx context.Context, repoDir string, gitRunner gitexec.Runner, com
 		commands = execRunner{}
 	}
 	base, err := gitsource.DetectBase(ctx, repoDir, gitRunner)
-	if err != nil {
-		return Catalog{}, err
-	}
 	result := Catalog{}
 	if status, statusErr := gitRunner.Run(ctx, repoDir, "status", "--porcelain"); statusErr == nil && len(bytes.TrimSpace(status)) > 0 {
 		result.Dirty = []Item{{
@@ -132,7 +129,11 @@ func Discover(ctx context.Context, repoDir string, gitRunner gitexec.Runner, com
 		}}
 	}
 	result.PRs, result.Notes = discoverPRs(ctx, repoDir, commands)
-	result.Branches = discoverBranches(ctx, repoDir, base, gitRunner)
+	if err == nil {
+		result.Branches = discoverBranches(ctx, repoDir, base, gitRunner)
+	} else {
+		result.Notes = append(result.Notes, "Branches unavailable: pass --base to review a branch by ref.")
+	}
 	result.Commits = discoverCommits(ctx, repoDir, gitRunner)
 	return result, nil
 }
@@ -226,7 +227,7 @@ func discoverPRs(ctx context.Context, repoDir string, runner CommandRunner) ([]I
 	if _, err := runner.LookPath("gh"); err != nil {
 		return nil, []string{"GitHub PRs unavailable: install and authenticate gh to include them."}
 	}
-	if _, err := runner.Run(ctx, repoDir, "gh", "auth", "status"); err != nil {
+	if _, err := runner.Run(ctx, repoDir, "gh", "auth", "status", "--active"); err != nil {
 		return nil, []string{"GitHub PRs unavailable: run `gh auth login` to include them."}
 	}
 	data, err := runner.Run(ctx, repoDir, "gh", "pr", "list", "--state", "open", "--limit", "1000", "--json", "number,title,updatedAt")

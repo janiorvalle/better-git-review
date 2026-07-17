@@ -40,7 +40,7 @@ func (s Source) Detect(opts source.Options) (bool, string) {
 	if _, err := runner.LookPath("gh"); err != nil {
 		return false, "PR mode needs the GitHub CLI - install from cli.github.com, then `gh auth login`. " + forgeLessHint
 	}
-	if _, err := runner.Run(context.Background(), opts.RepoDir, "gh", "auth", "status"); err != nil {
+	if _, err := runner.Run(context.Background(), opts.RepoDir, "gh", "auth", "status", "--active"); err != nil {
 		return false, "GitHub CLI is not authenticated - run `gh auth login`. " + forgeLessHint
 	}
 	return true, "GitHub CLI is installed and authenticated"

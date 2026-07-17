@@ -59,6 +59,16 @@ func TestRunSelectionAndQuit(t *testing.T) {
 	}
 }
 
+func TestDiscoverContinuesWithoutConventionalBase(t *testing.T) {
+	catalog, err := Discover(context.Background(), "/repo", pickerNoBaseGit{}, &pickerCommands{lookErr: errors.New("missing")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Commits) != 1 || len(catalog.Branches) != 0 || !strings.Contains(strings.Join(catalog.Notes, "\n"), "Branches unavailable") {
+		t.Fatalf("catalog = %#v", catalog)
+	}
+}
+
 type pickerCommands struct{ lookErr error }
 
 func (p *pickerCommands) LookPath(string) (string, error) { return "", p.lookErr }
@@ -83,5 +93,19 @@ func (pickerGit) Run(_ context.Context, _ string, args ...string) ([]byte, error
 		return []byte("fullsha\tshort\t1\tCommit subject\n"), nil
 	default:
 		return nil, errors.New("unexpected: " + joined)
+	}
+}
+
+type pickerNoBaseGit struct{}
+
+func (pickerNoBaseGit) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
+	joined := strings.Join(args, " ")
+	switch {
+	case strings.Contains(joined, "status --porcelain"):
+		return nil, nil
+	case strings.Contains(joined, "log -n 1000"):
+		return []byte("fullsha\tshort\t1\tCommit subject\n"), nil
+	default:
+		return nil, errors.New("no conventional base")
 	}
 }

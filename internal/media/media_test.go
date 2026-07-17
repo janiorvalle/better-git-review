@@ -90,10 +90,22 @@ func TestPatchImageGetsHonestLabel(t *testing.T) {
 	}
 }
 
+func TestModifiedImageDoesNotPresentUnavailableBlobAsMissingSide(t *testing.T) {
+	runner := &assetRunner{content: testPNG(t, 2, 2), failSpec: "merge:old.png"}
+	previews := Enrich(context.Background(), []document.File{{
+		Path: "image.png", OldPath: "old.png", NewPath: "image.png", Status: "modified", Binary: true,
+	}}, Source{RepoDir: "/repo", BaseRef: "base", HeadRef: "head"}, runner)
+	preview := previews[0]
+	if preview.Old != nil || preview.New != nil || !strings.Contains(preview.Label, "unavailable") || strings.Contains(preview.Label, "added") {
+		t.Fatalf("preview = %#v", preview)
+	}
+}
+
 type assetRunner struct {
-	content []byte
-	size    int
-	calls   []string
+	content  []byte
+	size     int
+	calls    []string
+	failSpec string
 }
 
 func (r *assetRunner) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -102,6 +114,9 @@ func (r *assetRunner) Run(_ context.Context, _ string, args ...string) ([]byte, 
 		return []byte("merge\n"), nil
 	}
 	if len(args) >= 2 && args[0] == "cat-file" && args[1] == "-s" {
+		if len(args) > 2 && args[2] == r.failSpec {
+			return nil, fmt.Errorf("missing blob")
+		}
 		size := r.size
 		if size == 0 {
 			size = len(r.content)

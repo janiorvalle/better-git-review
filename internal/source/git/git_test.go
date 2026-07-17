@@ -40,6 +40,7 @@ func TestCollectSupportsHeadAndCommitRanges(t *testing.T) {
 	writeGitFile(t, repo, "file.txt", "base\n")
 	runGitTest(t, repo, "add", "file.txt")
 	runGitTest(t, repo, "commit", "-m", "base")
+	baseSHA := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
 	runGitTest(t, repo, "switch", "-c", "one")
 	writeGitFile(t, repo, "one.txt", "one\n")
 	runGitTest(t, repo, "add", "one.txt")
@@ -57,7 +58,8 @@ func TestCollectSupportsHeadAndCommitRanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if byHead.Source.Range != "main...one" || !strings.Contains(string(byHead.Diff), "one.txt") || strings.Contains(string(byHead.Diff), "two.txt") {
+	if byHead.Source.Range != "main...one" || byHead.BaseRef != baseSHA || byHead.HeadRef != oneSHA ||
+		!strings.Contains(string(byHead.Diff), "one.txt") || strings.Contains(string(byHead.Diff), "two.txt") {
 		t.Fatalf("unexpected head result: %#v\n%s", byHead.Source, byHead.Diff)
 	}
 

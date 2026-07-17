@@ -87,8 +87,8 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 			}
 			remainingPreviewBytes -= embeddedBytes(newAsset)
 		}
-		label := sizeStory(imageFile, oldAsset, newAsset)
-		if imageFile && previewable(oldAsset) && previewable(newAsset) && (oldAsset != nil || newAsset != nil) {
+		label := sizeStory(imageFile, file.Status, oldAsset, newAsset)
+		if imageFile && canPreview(file.Status, oldAsset, newAsset) {
 			result[index] = Preview{Image: true, Old: oldAsset, New: newAsset, Label: label}
 			continue
 		}
@@ -202,10 +202,25 @@ func previewable(asset *Asset) bool {
 	return asset == nil || asset.DataURI != ""
 }
 
-func sizeStory(imageFile bool, oldAsset, newAsset *Asset) string {
+func canPreview(status string, oldAsset, newAsset *Asset) bool {
+	switch status {
+	case "added":
+		return newAsset != nil && previewable(newAsset)
+	case "deleted":
+		return oldAsset != nil && previewable(oldAsset)
+	default:
+		return oldAsset != nil && newAsset != nil && previewable(oldAsset) && previewable(newAsset)
+	}
+}
+
+func sizeStory(imageFile bool, status string, oldAsset, newAsset *Asset) string {
 	kind := "Binary file"
 	if imageFile {
 		kind = "Binary image"
+	}
+	if (status == "added" && newAsset == nil) || (status == "deleted" && oldAsset == nil) ||
+		(status != "added" && status != "deleted" && (oldAsset == nil || newAsset == nil)) {
+		return kind + " · one or more sides unavailable"
 	}
 	if oldAsset == nil && newAsset == nil {
 		return kind + " \u00b7 content unavailable"
