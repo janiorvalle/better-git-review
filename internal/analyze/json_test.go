@@ -30,6 +30,19 @@ func TestExtractJSONMissingObject(t *testing.T) {
 	}
 }
 
+func TestParseResponseIntoAcceptsTopLevelArray(t *testing.T) {
+	var result []BatchSummary
+	if err := ParseResponseInto(
+		`[{"index":3,"summary":"change","layerHint":"backend","keySymbols":[]}]`,
+		&result,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 || result[0].Index != 3 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestRepairJSON(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -32,14 +32,14 @@ structure instead of a flat wall of files.
 - Never use `-i` (the interactive picker) or `bgr configure` from an agent
   run; both are interactive. Edit config files directly instead.
 - Don't pass `--no-cache` without a concrete reason. Analysis is cached on
-  (diff, provider, model, reasoning) — re-runs of an unchanged diff are
-  free, and anything downstream should reuse the cache.
+  the diff, provider/model/reasoning, budget, and mechanical selection —
+  re-runs of an unchanged diff are free.
 - Auto-open only happens in a TTY, so agent runs won't pop browsers. If a
   human asked for the walkthrough, tell them the `--out` path.
 
 ## Reading the document (`--format json`)
 
-- `schemaVersion` — currently 4; validate before depending on fields.
+- `schemaVersion` — currently 5; validate before depending on fields.
 - `analysis.cohorts[]` — ordered for review. Walk them in order. Each has
   `title`, `layer` (schema|backend|api|ui|tests|config|docs|other),
   `intent`, `narrative`, `reviewNotes[]` (specific risks worth checking —
@@ -48,8 +48,11 @@ structure instead of a flat wall of files.
 - `files[]` — the full parsed diff: paths, status, hunks with line numbers.
 - `analysis.stubbedFiles[]` — files whose per-file summary failed during
   staged analysis; their grouping is path-derived, so trust it less.
+- `analysis.mechanicalFiles[]` — exact renames, repository-attested
+  generated files, and binaries deliberately skipped by the model. These
+  are neutral provenance, not analysis failures.
 - `meta.staged` — true when the diff was too large for one pass and was
-  summarized file-by-file first; ordering nuance may be weaker.
+  triaged, summarized in bounded batches, and grouped deterministically.
 
 A solid review workflow: run with `--format json`, walk cohorts in order,
 verify each cohort's `reviewNotes` against the actual hunks in `files`, and
@@ -66,6 +69,7 @@ report findings grouped by cohort.
 
   ```toml
   provider = "openrouter"
+  include_mechanical = false
 
   [providers.openrouter]
   model = "z-ai/glm-5.2"

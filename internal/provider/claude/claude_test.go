@@ -1,11 +1,21 @@
 package claude
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/janiorvalle/better-git-review/internal/provider"
 )
+
+func TestAnalysisBudgetUsesOnlyApprovedModels(t *testing.T) {
+	if got := (&CLI{Model: "sonnet"}).AnalysisBudget(context.Background()); got != 400_000 {
+		t.Fatalf("sonnet budget = %d", got)
+	}
+	if got := (&CLI{Model: "future-model"}).AnalysisBudget(context.Background()); got != provider.DefaultAnalysisBudget {
+		t.Fatalf("unknown model budget = %d", got)
+	}
+}
 
 func TestUnsupportedEffortReturnsEffectiveDefault(t *testing.T) {
 	selected, _, reasoning, warnings, err := newWithEffortSupport(provider.AdapterOptions{ReasoningOverride: "high"}, false)

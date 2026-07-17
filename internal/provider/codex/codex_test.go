@@ -1,11 +1,21 @@
 package codex
 
 import (
+	"context"
 	"slices"
 	"testing"
 
 	"github.com/janiorvalle/better-git-review/internal/provider"
 )
+
+func TestAnalysisBudgetUsesOnlyApprovedModels(t *testing.T) {
+	if got := (&CLI{Model: "gpt-5.6-luna"}).AnalysisBudget(context.Background()); got != 400_000 {
+		t.Fatalf("luna budget = %d", got)
+	}
+	if got := (&CLI{Model: "future-model"}).AnalysisBudget(context.Background()); got != provider.DefaultAnalysisBudget {
+		t.Fatalf("unknown model budget = %d", got)
+	}
+}
 
 func TestAdapterDefaultsAndReasoningValidation(t *testing.T) {
 	selected, model, reasoning, _, err := (Adapter{}).New(provider.AdapterOptions{})

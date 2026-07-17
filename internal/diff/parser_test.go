@@ -40,7 +40,8 @@ func TestParseFeatureFixtures(t *testing.T) {
 	}
 
 	renamed := files[2]
-	if renamed.Status != "renamed" || renamed.OldPath != "before.go" || renamed.NewPath != "after.go" || renamed.Path != "after.go" {
+	if renamed.Status != "renamed" || renamed.OldPath != "before.go" || renamed.NewPath != "after.go" ||
+		renamed.Path != "after.go" || renamed.Similarity == 0 {
 		t.Fatalf("unexpected renamed file: %#v", renamed)
 	}
 	if renamed.Hunks[0].Header != "func renamed() {" {
@@ -124,5 +125,35 @@ func TestParseMetadataPathPreservesWhitespace(t *testing.T) {
 	path := " report.txt "
 	if got := parseMetadataPath(path); got != path {
 		t.Fatalf("got %q, want %q", got, path)
+	}
+}
+
+func TestParseExactRenameSimilarity(t *testing.T) {
+	files, err := Parse(`diff --git a/old.go b/new.go
+similarity index 100%
+rename from old.go
+rename to new.go
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Status != "renamed" || files[0].Similarity != 100 {
+		t.Fatalf("exact rename = %#v", files)
+	}
+}
+
+func TestParseRenameModeChange(t *testing.T) {
+	files, err := Parse(`diff --git a/old.sh b/new.sh
+old mode 100644
+new mode 100755
+similarity index 100%
+rename from old.sh
+rename to new.sh
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || !files[0].ModeChanged {
+		t.Fatalf("mode-changing rename = %#v", files)
 	}
 }

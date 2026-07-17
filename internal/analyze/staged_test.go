@@ -14,51 +14,57 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
-func TestStagedSummaryRetryAndStubDegradation(t *testing.T) {
-	selected := &stagedTestProvider{
-		fileCount:    2,
-		invalidFirst: map[int]bool{0: true},
-		failAlways:   map[int]bool{1: true},
+func TestStagedBatchRetryStubsWholeBatch(t *testing.T) {
+	files := []document.File{
+		testStageFile(0, "src/first.go"),
+		testStageFile(1, "docs/broken.md"),
 	}
+	plan := PlanStaged(files, nil, false, DefaultStageBudget)
+	selected := &stagedTestProvider{failSummary: true}
 	analysis, err := Run(context.Background(), Options{
 		Provider: selected,
 		Source:   document.Source{Title: "staged"},
-		Files: []document.File{
-			testStageFile(0, "src/first.go"),
-			testStageFile(1, "docs/broken.md"),
-		},
+		Files:    files,
 		StateDir: t.TempDir(),
 		Staged:   true,
+		Budget:   DefaultStageBudget,
+		Plan:     &plan,
 		Random:   strings.NewReader("01234567"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected.attempts[0] != 2 || selected.attempts[1] != 2 || selected.clusterCalls != 1 {
-		t.Fatalf("unexpected calls: attempts=%v cluster=%d", selected.attempts, selected.clusterCalls)
+	if selected.summaryCalls != 2 || selected.narrationCalls != len(plan.Cohorts) || selected.synthesisCalls != 1 {
+		t.Fatalf("unexpected calls: summary=%d narration=%d synthesis=%d",
+			selected.summaryCalls, selected.narrationCalls, selected.synthesisCalls)
 	}
-	if len(analysis.StubbedFiles) != 1 || analysis.StubbedFiles[0] != 1 {
+	if fmt.Sprint(analysis.StubbedFiles) != "[1 0]" && fmt.Sprint(analysis.StubbedFiles) != "[0 1]" {
 		t.Fatalf("stubbed files = %#v", analysis.StubbedFiles)
 	}
-	if !strings.Contains(selected.clusterPrompt, "path-derived stub") ||
-		!strings.Contains(selected.clusterPrompt, "docs/broken.md") {
-		t.Fatalf("stub was not passed to clustering:\n%s", selected.clusterPrompt)
+	if len(analysis.MechanicalFiles) != 0 {
+		t.Fatalf("mechanical files = %#v", analysis.MechanicalFiles)
 	}
 }
 
-func TestStagedSummaryConcurrencyIsBounded(t *testing.T) {
-	const fileCount = 12
-	selected := &stagedTestProvider{fileCount: fileCount, delay: 25 * time.Millisecond}
+func TestStagedSummaryBatchConcurrencyIsBounded(t *testing.T) {
+	const fileCount = 125
 	files := make([]document.File, fileCount)
 	for index := range files {
-		files[index] = testStageFile(index, fmt.Sprintf("src/file-%02d.go", index))
+		files[index] = testStageFile(index, fmt.Sprintf("src/file-%03d.go", index))
 	}
+	plan := PlanStaged(files, nil, false, DefaultStageBudget)
+	if len(plan.SummaryBatches) != 5 {
+		t.Fatalf("summary batches = %d, want 5", len(plan.SummaryBatches))
+	}
+	selected := &stagedTestProvider{delay: 25 * time.Millisecond}
 	if _, err := Run(context.Background(), Options{
 		Provider: selected,
 		Source:   document.Source{Title: "concurrency"},
 		Files:    files,
 		StateDir: t.TempDir(),
 		Staged:   true,
+		Budget:   DefaultStageBudget,
+		Plan:     &plan,
 		Random:   strings.NewReader("01234567"),
 	}); err != nil {
 		t.Fatal(err)
@@ -66,19 +72,49 @@ func TestStagedSummaryConcurrencyIsBounded(t *testing.T) {
 	if selected.highWater != StageConcurrency {
 		t.Fatalf("concurrent high-water = %d, want %d", selected.highWater, StageConcurrency)
 	}
+	if got := selected.summaryCalls + selected.narrationCalls + selected.synthesisCalls; got != plan.Calls {
+		t.Fatalf("actual calls = %d, planned = %d", got, plan.Calls)
+	}
+}
+
+func TestStagedRetryPromptNeverExceedsPlannedBudget(t *testing.T) {
+	files := []document.File{testStageFile(0, "src/retry.go")}
+	budget := minimumStagedBudget(files) + 500
+	plan := PlanStaged(files, nil, false, budget)
+	selected := &stagedTestProvider{invalidSummaryOnce: true}
+	if _, err := Run(context.Background(), Options{
+		Provider: selected,
+		Source:   document.Source{Title: "bounded retry"},
+		Files:    files,
+		StateDir: t.TempDir(),
+		Staged:   true,
+		Budget:   budget,
+		Plan:     &plan,
+		Random:   strings.NewReader("01234567"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if selected.summaryCalls != 2 {
+		t.Fatalf("summary calls = %d, want retry", selected.summaryCalls)
+	}
+	for index, promptLength := range selected.promptLengths {
+		if promptLength > budget {
+			t.Fatalf("prompt %d length = %d, budget = %d", index, promptLength, budget)
+		}
+	}
 }
 
 type stagedTestProvider struct {
-	mu            sync.Mutex
-	fileCount     int
-	invalidFirst  map[int]bool
-	failAlways    map[int]bool
-	attempts      map[int]int
-	active        int
-	highWater     int
-	delay         time.Duration
-	clusterCalls  int
-	clusterPrompt string
+	mu                 sync.Mutex
+	failSummary        bool
+	invalidSummaryOnce bool
+	delay              time.Duration
+	active             int
+	highWater          int
+	summaryCalls       int
+	narrationCalls     int
+	synthesisCalls     int
+	promptLengths      []int
 }
 
 func (p *stagedTestProvider) Name() string { return "staged-test" }
@@ -87,53 +123,52 @@ func (p *stagedTestProvider) Detect() (bool, string) {
 }
 
 func (p *stagedTestProvider) Complete(_ context.Context, prompt string) (string, error) {
-	if strings.Contains(prompt, "STAGE: CLUSTER_SUMMARIES") {
+	p.mu.Lock()
+	p.promptLengths = append(p.promptLengths, len(prompt))
+	p.mu.Unlock()
+	switch {
+	case strings.Contains(prompt, "STAGE: SUMMARY_BATCH"):
 		p.mu.Lock()
-		p.clusterCalls++
-		p.clusterPrompt = prompt
-		p.mu.Unlock()
-		files := make([]int, p.fileCount)
-		summaries := make([]string, p.fileCount)
-		for index := range files {
-			files[index] = index
-			summaries[index] = "summary"
+		p.summaryCalls++
+		summaryCall := p.summaryCalls
+		p.active++
+		if p.active > p.highWater {
+			p.highWater = p.active
 		}
-		encoded, _ := json.Marshal(document.Analysis{
-			Title: "staged", Overview: "clustered summaries",
-			Cohorts: []document.Cohort{{
-				Title: "Changes", Layer: "backend", Intent: "intent", Narrative: "narrative",
-				Files: files, FileSummaries: summaries, ReviewNotes: []string{}, DependsOn: []int{},
-			}},
-		})
+		p.mu.Unlock()
+		if p.delay > 0 {
+			time.Sleep(p.delay)
+		}
+		p.mu.Lock()
+		p.active--
+		p.mu.Unlock()
+		if p.failSummary || p.invalidSummaryOnce && summaryCall == 1 {
+			return `{"summary":`, nil
+		}
+		matches := regexp.MustCompile(`(?m)^===== FILE (\d+):`).FindAllStringSubmatch(prompt, -1)
+		result := make([]BatchSummary, 0, len(matches))
+		for _, match := range matches {
+			index, _ := strconv.Atoi(match[1])
+			result = append(result, BatchSummary{
+				Index: index, Summary: fmt.Sprintf("file %d", index),
+				LayerHint: "backend", KeySymbols: []string{},
+			})
+		}
+		encoded, _ := json.Marshal(result)
 		return string(encoded), nil
+	case strings.Contains(prompt, "STAGE: COHORT_NARRATE"):
+		p.mu.Lock()
+		p.narrationCalls++
+		p.mu.Unlock()
+		return `{"title":"Changes","intent":"Review changes.","narrative":"Review the grouped files.","reviewNotes":[]}`, nil
+	case strings.Contains(prompt, "STAGE: SYNTHESIS"):
+		p.mu.Lock()
+		p.synthesisCalls++
+		p.mu.Unlock()
+		return `{"title":"Staged","overview":"Staged analysis."}`, nil
+	default:
+		return "", fmt.Errorf("unexpected prompt stage")
 	}
-	match := regexp.MustCompile(`(?m)^===== FILE (\d+):`).FindStringSubmatch(prompt)
-	if len(match) != 2 {
-		return "", fmt.Errorf("summary prompt did not contain a file index")
-	}
-	index, _ := strconv.Atoi(match[1])
-	p.mu.Lock()
-	if p.attempts == nil {
-		p.attempts = map[int]int{}
-	}
-	p.attempts[index]++
-	attempt := p.attempts[index]
-	p.active++
-	if p.active > p.highWater {
-		p.highWater = p.active
-	}
-	p.mu.Unlock()
-	if p.delay > 0 {
-		time.Sleep(p.delay)
-	}
-	p.mu.Lock()
-	p.active--
-	p.mu.Unlock()
-
-	if p.failAlways[index] || (p.invalidFirst[index] && attempt == 1) {
-		return `{"summary":`, nil
-	}
-	return fmt.Sprintf(`{"summary":"file %d","layerHint":"backend","keySymbols":[]}`, index), nil
 }
 
 func testStageFile(index int, path string) document.File {

@@ -9,6 +9,7 @@ import (
 
 func ApplySeatbelts(analysis document.Analysis, fileCount int) document.Analysis {
 	analysis.StubbedFiles = []int{}
+	analysis.MechanicalFiles = []int{}
 	seen := make(map[int]bool, fileCount)
 	type retainedCohort struct {
 		cohort document.Cohort
@@ -141,6 +142,23 @@ func ValidateComplete(analysis document.Analysis, fileCount int) []string {
 			errors = append(errors, fmt.Sprintf("stubbedFiles contains duplicate index %d", fileIndex))
 		}
 		seenStub[fileIndex] = true
+	}
+	if analysis.MechanicalFiles == nil {
+		errors = append(errors, "mechanicalFiles must be present")
+	}
+	seenMechanical := map[int]bool{}
+	for _, fileIndex := range analysis.MechanicalFiles {
+		if fileIndex < 0 || fileIndex >= fileCount {
+			errors = append(errors, fmt.Sprintf("mechanicalFiles contains out-of-range index %d", fileIndex))
+			continue
+		}
+		if seenMechanical[fileIndex] {
+			errors = append(errors, fmt.Sprintf("mechanicalFiles contains duplicate index %d", fileIndex))
+		}
+		if seenStub[fileIndex] {
+			errors = append(errors, fmt.Sprintf("file index %d cannot be both stubbed and mechanical", fileIndex))
+		}
+		seenMechanical[fileIndex] = true
 	}
 	return errors
 }

@@ -77,7 +77,7 @@ func TestDelimiterGenerationAndChosenMarkerNeutralization(t *testing.T) {
 	if strings.Count(prompt, delimiters.Begin) != 2 || strings.Count(prompt, delimiters.End) != 2 {
 		t.Fatalf("chosen delimiter leaked from framed content:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "[neutralized untrusted delimiter]") {
+	if !strings.Contains(prompt, "[neutralized]") {
 		t.Fatalf("neutralized marker missing:\n%s", prompt)
 	}
 }

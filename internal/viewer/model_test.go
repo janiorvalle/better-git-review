@@ -38,3 +38,23 @@ func TestBuildPageFlagsStubbedFiles(t *testing.T) {
 		t.Fatalf("stub flags = %#v", page.Files)
 	}
 }
+
+func TestBuildPageSeparatesMechanicalFromStubbedFiles(t *testing.T) {
+	page, err := buildPage(document.Document{
+		Files: []document.File{{Path: "generated.go"}, {Path: "failed.go"}},
+		Analysis: document.Analysis{
+			MechanicalFiles: []int{0},
+			StubbedFiles:    []int{1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !page.Files[0].Mechanical || page.Files[0].Stubbed ||
+		page.Files[1].Mechanical || !page.Files[1].Stubbed {
+		t.Fatalf("provenance flags = %#v", page.Files)
+	}
+	if page.MechanicalCount != 1 || len(page.MechanicalFiles) != 1 {
+		t.Fatalf("mechanical summary = %#v", page)
+	}
+}

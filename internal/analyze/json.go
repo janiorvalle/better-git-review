@@ -43,10 +43,15 @@ func ExtractJSON(text string) ([]byte, error) {
 			text = rest[:end]
 		}
 	}
-	start := strings.IndexByte(text, '{')
-	end := strings.LastIndexByte(text, '}')
+	objectStart := strings.IndexByte(text, '{')
+	arrayStart := strings.IndexByte(text, '[')
+	start, closing := objectStart, byte('}')
+	if arrayStart >= 0 && (objectStart < 0 || arrayStart < objectStart) {
+		start, closing = arrayStart, ']'
+	}
+	end := strings.LastIndexByte(text, closing)
 	if start < 0 || end <= start {
-		return nil, fmt.Errorf("response did not contain a JSON object")
+		return nil, fmt.Errorf("response did not contain a JSON object or array")
 	}
 	return []byte(text[start : end+1]), nil
 }

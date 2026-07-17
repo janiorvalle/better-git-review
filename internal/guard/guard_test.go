@@ -25,12 +25,8 @@ func TestConfirmCostGuard(t *testing.T) {
 }
 
 func TestAnalysisPlanArithmetic(t *testing.T) {
-	single := AnalysisPlan(50, false, "mock", "test", "low")
-	if single.Calls != 1 || single.MaxCalls != 2 {
-		t.Fatalf("single-pass plan = %#v", single)
-	}
-	staged := AnalysisPlan(6, true, "mock", "test", "low")
-	if staged.Calls != 7 || staged.MaxCalls != 14 {
-		t.Fatalf("staged plan = %#v", staged)
+	plan := AnalysisPlan(9, "mock", "test", "low")
+	if plan.Calls != 9 {
+		t.Fatalf("plan = %#v", plan)
 	}
 }

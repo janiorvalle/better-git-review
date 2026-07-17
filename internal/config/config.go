@@ -18,9 +18,10 @@ import (
 )
 
 type Config struct {
-	Provider  string                    `toml:"provider"`
-	AutoOpen  *bool                     `toml:"auto_open"`
-	Providers map[string]ProviderConfig `toml:"providers"`
+	Provider          string                    `toml:"provider"`
+	AutoOpen          *bool                     `toml:"auto_open"`
+	IncludeMechanical *bool                     `toml:"include_mechanical"`
+	Providers         map[string]ProviderConfig `toml:"providers"`
 }
 
 type ProviderConfig struct {
@@ -132,15 +133,19 @@ func Load(opts LoadOptions) (Loaded, error) {
 
 func Merge(base, override Config) Config {
 	result := Config{
-		Provider:  base.Provider,
-		AutoOpen:  cloneBool(base.AutoOpen),
-		Providers: cloneProviders(base.Providers),
+		Provider:          base.Provider,
+		AutoOpen:          cloneBool(base.AutoOpen),
+		IncludeMechanical: cloneBool(base.IncludeMechanical),
+		Providers:         cloneProviders(base.Providers),
 	}
 	if override.Provider != "" {
 		result.Provider = override.Provider
 	}
 	if override.AutoOpen != nil {
 		result.AutoOpen = cloneBool(override.AutoOpen)
+	}
+	if override.IncludeMechanical != nil {
+		result.IncludeMechanical = cloneBool(override.IncludeMechanical)
 	}
 	if result.Providers == nil {
 		result.Providers = map[string]ProviderConfig{}
@@ -165,7 +170,7 @@ func Merge(base, override Config) Config {
 }
 
 func HasProviderSettings(cfg Config) bool {
-	return cfg.Provider != "" || len(cfg.Providers) > 0
+	return cfg.Provider != "" || cfg.IncludeMechanical != nil || len(cfg.Providers) > 0
 }
 
 func Fingerprint(cfg Config) (string, error) {
@@ -174,9 +179,10 @@ func Fingerprint(cfg Config) (string, error) {
 		Config ProviderConfig `json:"config"`
 	}
 	canonical := struct {
-		Provider  string          `json:"provider"`
-		Providers []providerEntry `json:"providers"`
-	}{Provider: cfg.Provider}
+		Provider          string          `json:"provider"`
+		IncludeMechanical *bool           `json:"includeMechanical,omitempty"`
+		Providers         []providerEntry `json:"providers"`
+	}{Provider: cfg.Provider, IncludeMechanical: cfg.IncludeMechanical}
 	names := make([]string, 0, len(cfg.Providers))
 	for name := range cfg.Providers {
 		names = append(names, name)
@@ -197,6 +203,9 @@ func DescribeProviderSettings(cfg Config) string {
 	var lines []string
 	if cfg.Provider != "" {
 		lines = append(lines, fmt.Sprintf("provider = %q", cfg.Provider))
+	}
+	if cfg.IncludeMechanical != nil {
+		lines = append(lines, fmt.Sprintf("include_mechanical = %t", *cfg.IncludeMechanical))
 	}
 	names := make([]string, 0, len(cfg.Providers))
 	for name := range cfg.Providers {
@@ -239,7 +248,7 @@ func ensureRepoTrust(opts LoadOptions, repoCfg Config) error {
 		return nil
 	}
 
-	fmt.Fprintf(opts.Output, "This repository's config (%s) wants to set your provider:\n%s\n", repoPath, DescribeProviderSettings(repoCfg))
+	fmt.Fprintf(opts.Output, "This repository's config (%s) wants to set analysis options:\n%s\n", repoPath, DescribeProviderSettings(repoCfg))
 	if !opts.AcceptRepoTrust && !opts.Yes {
 		if !opts.InputIsTTY {
 			return fmt.Errorf("these repo settings aren't trusted yet - rerun with --trust-repo-config (or --yes) once you've looked them over")

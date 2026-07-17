@@ -27,11 +27,18 @@ type Page struct {
 	Additions        int
 	Deletions        int
 	CohortCount      int
+	MechanicalCount  int
+	MechanicalFiles  []MechanicalFileView
 	DocID            string
 	Diagram          template.HTML
 	Overview         string
 	Steps            []StepView
 	Files            []FileView
+}
+
+type MechanicalFileView struct {
+	Path   string
+	Status string
 }
 
 type StepView struct {
@@ -65,6 +72,7 @@ type FileView struct {
 	Binary       bool
 	Summary      string
 	Stubbed      bool
+	Mechanical   bool
 	Collapsed    bool
 	StepPosition int
 	StepTotal    int
@@ -117,6 +125,11 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 	for _, fileIndex := range doc.Analysis.StubbedFiles {
 		stubbedFiles[fileIndex] = true
 	}
+	mechanicalFiles := make(map[int]bool, len(doc.Analysis.MechanicalFiles))
+	for _, fileIndex := range doc.Analysis.MechanicalFiles {
+		mechanicalFiles[fileIndex] = true
+	}
+	page.MechanicalCount = len(mechanicalFiles)
 	for index, file := range doc.Files {
 		unified, split := BuildRows(file, index)
 		page.Additions += file.Additions
@@ -135,6 +148,7 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 			Deletions:    file.Deletions,
 			Binary:       file.Binary,
 			Stubbed:      stubbedFiles[index],
+			Mechanical:   mechanicalFiles[index],
 			Collapsed:    file.Additions+file.Deletions > 400,
 			PrevFile:     -1,
 			NextFile:     -1,
@@ -144,6 +158,11 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 			ImagePreview: preview.Old != nil || preview.New != nil,
 			OldImage:     imageAssetView(preview.Old),
 			NewImage:     imageAssetView(preview.New),
+		}
+		if mechanicalFiles[index] {
+			page.MechanicalFiles = append(page.MechanicalFiles, MechanicalFileView{
+				Path: file.Path, Status: file.Status,
+			})
 		}
 	}
 	page.Steps = append(page.Steps, StepView{

@@ -42,6 +42,7 @@ type Client struct {
 	Getenv           func(string) string
 	HTTPClient       *http.Client
 	reasoningByModel map[string][]string
+	contextByModel   map[string]int
 	catalogLoaded    bool
 }
 
@@ -50,6 +51,7 @@ func (p *Client) Name() string { return "openrouter" }
 func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
 	p.catalogLoaded = false
 	p.reasoningByModel = nil
+	p.contextByModel = nil
 	client := p.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
@@ -85,6 +87,7 @@ func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
 	}
 	result := make([]provider.ModelOption, 0, len(payload.Data))
 	p.reasoningByModel = map[string][]string{}
+	p.contextByModel = map[string]int{}
 	for _, model := range payload.Data {
 		if model.ID == "" {
 			continue
@@ -94,6 +97,9 @@ func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
 			ID: model.ID, Label: provider.DefaultString(model.Name, model.ID), Note: note,
 			Default: model.ID == "z-ai/glm-5.2",
 		})
+		if model.ContextLength > 0 {
+			p.contextByModel[model.ID] = model.ContextLength
+		}
 		rawEfforts := model.Reasoning.SupportedEfforts
 		switch {
 		case len(rawEfforts) == 0:
@@ -112,6 +118,27 @@ func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
 	}
 	p.catalogLoaded = true
 	return result, nil
+}
+
+func (p *Client) AnalysisBudget(ctx context.Context) int {
+	if p.contextByModel == nil {
+		_, _ = p.Models(ctx)
+	}
+	if contextLength := p.contextByModel[p.Model]; contextLength > 0 {
+		// 3.5 chars/token at 60% of context, rounded down to 10k chars.
+		budget := int((int64(contextLength) * 21 / 10) / 10_000 * 10_000)
+		if budget > 0 {
+			return budget
+		}
+	}
+	switch p.Model {
+	case "z-ai/glm-5.2":
+		return 2_000_000
+	case "anthropic/claude-sonnet-4.5":
+		return 400_000
+	default:
+		return provider.DefaultAnalysisBudget
+	}
 }
 
 func (p *Client) ReasoningLevels() []string {

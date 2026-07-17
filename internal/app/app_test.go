@@ -287,7 +287,7 @@ func TestRenderStageSupportsJSONAndHTML(t *testing.T) {
 		Source:        document.Source{Title: "Change", Name: "change"},
 		Files:         []document.File{{Path: "a.go"}},
 		Analysis: document.Analysis{
-			Title: "Change", Overview: "Overview", StubbedFiles: []int{},
+			Title: "Change", Overview: "Overview", StubbedFiles: []int{}, MechanicalFiles: []int{},
 			Cohorts: []document.Cohort{{
 				Title: "Backend", Layer: "backend", Intent: "Intent", Narrative: "Narrative",
 				Files: []int{0}, FileSummaries: []string{"Summary"},
