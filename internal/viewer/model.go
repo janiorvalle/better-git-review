@@ -18,6 +18,7 @@ type Page struct {
 	Title            string
 	Range            string
 	JSON             template.JS
+	DiffJSON         template.JS
 	ChromaTokens     template.CSS
 	ChromaLight      template.CSS
 	ChromaDark       template.CSS
@@ -29,6 +30,7 @@ type Page struct {
 	CohortCount      int
 	MechanicalCount  int
 	MechanicalFiles  []MechanicalFileView
+	ClientFileCards  bool
 	DocID            string
 	Diagram          template.HTML
 	Overview         string
@@ -74,12 +76,12 @@ type FileView struct {
 	Stubbed      bool
 	Mechanical   bool
 	Collapsed    bool
+	ClientRows   bool
 	StepPosition int
 	StepTotal    int
 	PrevFile     int
 	NextFile     int
 	UnifiedRows  []UnifiedRow
-	SplitRows    []SplitRow
 	BinaryLabel  string
 	ImagePreview bool
 	OldImage     *ImageAssetView
@@ -97,7 +99,12 @@ func buildPage(doc document.Document) (Page, error) {
 }
 
 func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview) (Page, error) {
-	encoded, err := json.Marshal(doc)
+	metadata := doc
+	metadata.Files = append([]document.File(nil), doc.Files...)
+	for index := range metadata.Files {
+		metadata.Files[index].Hunks = nil
+	}
+	encoded, err := json.Marshal(metadata)
 	if err != nil {
 		return Page{}, err
 	}
@@ -117,6 +124,7 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 		ChromaDarkRules:  chromaTheme.DarkRules,
 		TotalFiles:       len(doc.Files),
 		CohortCount:      len(doc.Analysis.Cohorts),
+		ClientFileCards:  doc.Meta.Staged,
 		DocID:            docID(doc),
 		Overview:         doc.Analysis.Overview,
 		Files:            make([]FileView, len(doc.Files)),
@@ -131,7 +139,11 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 	}
 	page.MechanicalCount = len(mechanicalFiles)
 	for index, file := range doc.Files {
-		unified, split := BuildRows(file, index)
+		var unified []UnifiedRow
+		clientRows := doc.Meta.Staged && !file.Binary
+		if !clientRows {
+			unified = BuildRows(file, index)
+		}
 		page.Additions += file.Additions
 		page.Deletions += file.Deletions
 		preview := previews[index]
@@ -150,10 +162,10 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 			Stubbed:      stubbedFiles[index],
 			Mechanical:   mechanicalFiles[index],
 			Collapsed:    file.Additions+file.Deletions > 400,
+			ClientRows:   clientRows,
 			PrevFile:     -1,
 			NextFile:     -1,
 			UnifiedRows:  unified,
-			SplitRows:    split,
 			BinaryLabel:  binaryLabel,
 			ImagePreview: preview.Old != nil || preview.New != nil,
 			OldImage:     imageAssetView(preview.Old),
@@ -165,6 +177,14 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 			})
 		}
 	}
+	diffIsland := `{"f":[],"u":[]}`
+	if doc.Meta.Staged {
+		diffIsland, err = compactDiffJSON(doc.Files, page.Files)
+		if err != nil {
+			return Page{}, err
+		}
+	}
+	page.DiffJSON = template.JS(diffIsland)
 	page.Steps = append(page.Steps, StepView{
 		Index: 0, ID: "step-overview", Title: "Overview", IsOverview: true,
 		FileCount: len(doc.Files),

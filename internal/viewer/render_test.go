@@ -53,8 +53,9 @@ func TestRenderEscapesHostileData(t *testing.T) {
 	if strings.Contains(html, `<img src=x onerror`) {
 		t.Fatal("hostile image tag reached HTML unescaped")
 	}
-	// Three scripts: the head theme-stamper, the JSON island, and the viewer.
-	if strings.Count(html, "<script") != 3 {
+	// Four scripts: the head theme-stamper, metadata island, compact diff
+	// island, and the viewer.
+	if strings.Count(html, "<script") != 4 {
 		t.Fatalf("unexpected script tags in output: %d", strings.Count(html, "<script"))
 	}
 	if strings.Contains(html, "mermaid") {
@@ -67,6 +68,49 @@ func TestRenderEscapesHostileData(t *testing.T) {
 	}
 	if decoded.Files[0].Path != hostile {
 		t.Fatalf("JSON island did not preserve hostile text: %q", decoded.Files[0].Path)
+	}
+}
+
+func TestStagedRenderUsesCompactCanonicalDiffPayload(t *testing.T) {
+	line := `const value = "</script><script>alert(1)</script>"`
+	doc := document.Document{
+		SchemaVersion: document.SchemaVersion,
+		Meta:          document.Meta{Staged: true},
+		Source:        document.Source{Title: "Compact", Range: "main...head"},
+		Files: []document.File{{
+			Path: "src/app.js", Status: "modified", Additions: 1,
+			Hunks: []document.Hunk{{Header: "app", Lines: []document.HunkLine{{
+				Type: "a", New: 1, Text: line,
+			}}}},
+		}},
+		Analysis: document.Analysis{
+			Title: "Compact", Overview: "Compact",
+			Cohorts: []document.Cohort{{
+				Title: "App", Layer: "ui", Intent: "Review", Narrative: "Review",
+				Files: []int{0}, FileSummaries: []string{"App"},
+				ReviewNotes: []string{}, DependsOn: []int{},
+			}},
+			StubbedFiles: []int{}, MechanicalFiles: []int{},
+		},
+	}
+	output, err := Render(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(output)
+	if strings.Count(html, line) != 0 {
+		t.Fatal("raw staged line escaped its canonical payload")
+	}
+	if strings.Contains(extractIsland(t, html), `"hunks":[`) {
+		t.Fatal("metadata island duplicated staged hunks")
+	}
+	if !strings.Contains(html, `Large diff · plain-text rendering`) ||
+		!strings.Contains(html, `data-client-files="0"`) ||
+		!strings.Contains(html, `function makeClientBody(`) {
+		t.Fatal("staged file did not use client row rendering")
+	}
+	if strings.Count(html, `\u003c/script`) < 2 {
+		t.Fatal("compact diff payload did not safely encode script delimiters")
 	}
 }
 
@@ -94,6 +138,84 @@ func TestRenderUsesImgForSVGPreviewOutsideJSONIsland(t *testing.T) {
 	}
 	if strings.Contains(extractIsland(t, html), "data:image") {
 		t.Fatal("render-time preview leaked into the JSON island")
+	}
+}
+
+func TestStagedRenderKeepsImagePreviewInCompactPayload(t *testing.T) {
+	doc := document.Document{
+		SchemaVersion: document.SchemaVersion,
+		Meta:          document.Meta{Staged: true},
+		Source:        document.Source{Title: "Image", Range: "main...head"},
+		Files:         []document.File{{Path: "image.png", Status: "modified", Binary: true}},
+		Analysis: document.Analysis{Title: "Image", Overview: "Image change", Cohorts: []document.Cohort{{
+			Title: "Image", Layer: "ui", Intent: "Image", Narrative: "Image",
+			Files: []int{0}, FileSummaries: []string{"Image"}, ReviewNotes: []string{}, DependsOn: []int{},
+		}}},
+	}
+	dataURI := "data:image/png;base64,cHJldmlldw=="
+	output, err := RenderWithPreviews(doc, map[int]media.Preview{0: {
+		Image: true,
+		Old:   &media.Asset{DataURI: dataURI, SizeLabel: "7 B", Dimensions: "1x1"},
+		Label: "Binary image",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(output)
+	if strings.Contains(html, `<img src="data:image/png`) {
+		t.Fatal("staged preview was duplicated as server-rendered markup")
+	}
+	if strings.Count(html, dataURI) != 1 ||
+		!strings.Contains(html, `function appendImagePane(`) {
+		t.Fatal("staged preview was not preserved in the compact client payload")
+	}
+	if strings.Contains(extractIsland(t, html), "data:image") {
+		t.Fatal("staged preview leaked into the metadata island")
+	}
+}
+
+func TestRenderShipsLazyUnifiedTemplatesWithoutSplitTables(t *testing.T) {
+	doc := document.Document{
+		SchemaVersion: document.SchemaVersion,
+		Source:        document.Source{Title: "Lazy", Range: "main...head"},
+		Files: []document.File{
+			{Path: "small.go", Status: "modified", Additions: 1, Hunks: []document.Hunk{{
+				Lines: []document.HunkLine{{Type: "a", New: 1, Text: "package small"}},
+			}}},
+			{Path: "large.go", Status: "modified", Additions: 401, Hunks: []document.Hunk{{
+				Lines: []document.HunkLine{{Type: "a", New: 1, Text: "package large"}},
+			}}},
+		},
+		Analysis: document.Analysis{
+			Title: "Lazy", Overview: "Lazy bodies",
+			Cohorts: []document.Cohort{{
+				Title: "Files", Layer: "backend", Intent: "Review", Narrative: "Review",
+				Files: []int{0, 1}, FileSummaries: []string{"small", "large"},
+				ReviewNotes: []string{}, DependsOn: []int{},
+			}},
+			StubbedFiles: []int{}, MechanicalFiles: []int{},
+		},
+	}
+	output, err := Render(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(output)
+	if count := strings.Count(html, `<template class="file-body-template">`); count != 2 {
+		t.Fatalf("lazy body templates = %d, want 2", count)
+	}
+	if strings.Contains(html, `class="diff-table split-table"`) {
+		t.Fatal("server-rendered split table survived lazy split conversion")
+	}
+	for _, marker := range []string{
+		`data-split-ready="false"`,
+		`function stampFile(file)`,
+		`function ensureSplit(file)`,
+		`section.querySelectorAll(".file:not(.collapsed)").forEach(stampFile)`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Fatalf("lazy viewer missing %q", marker)
+		}
 	}
 }
 

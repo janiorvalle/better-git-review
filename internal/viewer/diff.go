@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
@@ -16,18 +17,14 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
-const FoldThreshold = 10
+const (
+	FoldThreshold     = 10
+	LongLineThreshold = 4_096
+)
 
 type Span struct {
 	Start int
 	End   int
-}
-
-type LineCell struct {
-	Number      int
-	Code        template.HTML
-	Class       string
-	Placeholder bool
 }
 
 type UnifiedRow struct {
@@ -37,17 +34,7 @@ type UnifiedRow struct {
 	New       int
 	Prefix    string
 	Code      template.HTML
-	Header    string
-	Blame     *document.Blame
-	FoldID    string
-	FoldCount int
-	Hidden    bool
-}
-
-type SplitRow struct {
-	Kind      string
-	Old       LineCell
-	New       LineCell
+	LongLine  bool
 	Header    string
 	Blame     *document.Blame
 	FoldID    string
@@ -67,6 +54,9 @@ type linePair struct {
 const changedSpanMinSimilarity = 0.5
 
 func ChangedSpans(oldText, newText string) (Span, Span, bool) {
+	if isLongLine(oldText) || isLongLine(newText) {
+		return Span{}, Span{}, false
+	}
 	oldRunes := []rune(oldText)
 	newRunes := []rune(newText)
 	prefix := 0
@@ -131,18 +121,15 @@ func countNonSpace(runes []rune) int {
 	return count
 }
 
-func BuildRows(file document.File, fileIndex int) ([]UnifiedRow, []SplitRow) {
+func BuildRows(file document.File, fileIndex int) []UnifiedRow {
 	highlighter := newHighlighter(file.Path)
 	var unified []UnifiedRow
-	var split []SplitRow
 	for hunkIndex, hunk := range file.Hunks {
 		if hunk.Blame != nil {
 			unified = append(unified, UnifiedRow{Kind: "blame", Blame: hunk.Blame})
-			split = append(split, SplitRow{Kind: "blame", Blame: hunk.Blame})
 		}
 		header := hunkLabel(hunk)
 		unified = append(unified, UnifiedRow{Kind: "hunk", Header: header})
-		split = append(split, SplitRow{Kind: "hunk", Header: header})
 
 		pairs := pairChangedLines(hunk.Lines)
 		startUnified := len(unified)
@@ -156,12 +143,13 @@ func BuildRows(file document.File, fileIndex int) ([]UnifiedRow, []SplitRow) {
 				}
 			}
 			unified = append(unified, UnifiedRow{
-				Kind:   "line",
-				Class:  line.Type,
-				Old:    line.Old,
-				New:    line.New,
-				Prefix: linePrefix(line.Type),
-				Code:   highlighter.highlight(line.Text, span),
+				Kind:     "line",
+				Class:    line.Type,
+				Old:      line.Old,
+				New:      line.New,
+				Prefix:   linePrefix(line.Type),
+				Code:     highlighter.highlight(line.Text, span),
+				LongLine: isLongLine(line.Text),
 			})
 		}
 		applyFolds(
@@ -175,20 +163,8 @@ func BuildRows(file document.File, fileIndex int) ([]UnifiedRow, []SplitRow) {
 			},
 		)
 
-		startSplit := len(split)
-		split = append(split, buildSplitLines(hunk.Lines, pairs, highlighter)...)
-		applyFolds(
-			split[startSplit:],
-			fmt.Sprintf("s-%d-%d", fileIndex, hunkIndex),
-			isSplitContext,
-			func(row *SplitRow, foldID string, foldCount int) {
-				row.Hidden = true
-				row.FoldID = foldID
-				row.FoldCount = foldCount
-			},
-		)
 	}
-	return unified, split
+	return unified
 }
 
 func pairChangedLines(lines []document.HunkLine) map[int]linePair {
@@ -212,7 +188,12 @@ func pairChangedLines(lines []document.HunkLine) map[int]linePair {
 		}
 		count := min(deleteEnd-deleteStart, index-addStart)
 		for offset := 0; offset < count; offset++ {
-			oldSpan, newSpan, changed := ChangedSpans(lines[deleteStart+offset].Text, lines[addStart+offset].Text)
+			oldText := lines[deleteStart+offset].Text
+			newText := lines[addStart+offset].Text
+			if isLongLine(oldText) || isLongLine(newText) {
+				continue
+			}
+			oldSpan, newSpan, changed := ChangedSpans(oldText, newText)
 			if !changed {
 				continue
 			}
@@ -222,66 +203,6 @@ func pairChangedLines(lines []document.HunkLine) map[int]linePair {
 		}
 	}
 	return result
-}
-
-func buildSplitLines(lines []document.HunkLine, pairs map[int]linePair, highlighter *syntaxHighlighter) []SplitRow {
-	var rows []SplitRow
-	for index := 0; index < len(lines); {
-		if lines[index].Type == "d" {
-			deleteStart := index
-			for index < len(lines) && lines[index].Type == "d" {
-				index++
-			}
-			deleteEnd := index
-			addStart := index
-			for index < len(lines) && lines[index].Type == "a" {
-				index++
-			}
-			addEnd := index
-			count := max(deleteEnd-deleteStart, addEnd-addStart)
-			for offset := 0; offset < count; offset++ {
-				row := SplitRow{Kind: "line"}
-				if deleteStart+offset < deleteEnd {
-					lineIndex := deleteStart + offset
-					row.Old = cellForLine(lines[lineIndex], highlighter, pairs[lineIndex].oldSpan)
-				} else {
-					row.Old = LineCell{Placeholder: true}
-				}
-				if addStart+offset < addEnd {
-					lineIndex := addStart + offset
-					row.New = cellForLine(lines[lineIndex], highlighter, pairs[lineIndex].newSpan)
-				} else {
-					row.New = LineCell{Placeholder: true}
-				}
-				rows = append(rows, row)
-			}
-			continue
-		}
-		line := lines[index]
-		if line.Type == "a" {
-			rows = append(rows, SplitRow{
-				Kind: "line",
-				Old:  LineCell{Placeholder: true},
-				New:  cellForLine(line, highlighter, nil),
-			})
-		} else {
-			oldCell := cellForLine(line, highlighter, nil)
-			newCell := oldCell
-			oldCell.Number = line.Old
-			newCell.Number = line.New
-			rows = append(rows, SplitRow{Kind: "line", Old: oldCell, New: newCell})
-		}
-		index++
-	}
-	return rows
-}
-
-func cellForLine(line document.HunkLine, highlighter *syntaxHighlighter, span *Span) LineCell {
-	number := line.New
-	if line.Type == "d" {
-		number = line.Old
-	}
-	return LineCell{Number: number, Code: highlighter.highlight(line.Text, span), Class: line.Type}
 }
 
 func applyFolds[T any](
@@ -312,10 +233,6 @@ func applyFolds[T any](
 		}
 		start = end
 	}
-}
-
-func isSplitContext(row SplitRow) bool {
-	return row.Kind == "line" && row.Old.Class == "c" && row.New.Class == "c"
 }
 
 // hunkLabel returns the display text for a hunk separator row. Git headers
@@ -378,6 +295,9 @@ func newHighlighter(path string) *syntaxHighlighter {
 }
 
 func (h *syntaxHighlighter) highlight(text string, span *Span) template.HTML {
+	if isLongLine(text) {
+		return template.HTML(template.HTMLEscapeString(text))
+	}
 	if span == nil || span.Start >= span.End {
 		// No span, or an empty span (pure insertion/deletion on the other
 		// side) — an empty <mark> adds nothing but DOM noise.
@@ -408,6 +328,13 @@ func (h *syntaxHighlighter) highlightPart(text string) string {
 		return template.HTMLEscapeString(text)
 	}
 	return strings.TrimSuffix(output.String(), "\n")
+}
+
+func isLongLine(text string) bool {
+	if len(text) <= LongLineThreshold {
+		return false
+	}
+	return utf8.RuneCountInString(text) > LongLineThreshold
 }
 
 type ChromaTheme struct {
