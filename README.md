@@ -1,5 +1,9 @@
 # better-git-review
 
+<p align="center">
+  <img src="assets/hero.png" alt="bgr — better-git-review. git reviews, but better. obviously." width="840">
+</p>
+
 `bgr` turns a pull request or unified diff into one guided HTML
 walkthrough. Instead of presenting a flat wall of files, it groups related
 changes into ordered cohorts, explains the intent of each group, links
@@ -8,6 +12,16 @@ highlighting, unified/split views, word-level changes, folding, and blame.
 The result is one portable HTML file that opens directly in a browser.
 
 [Open the generated example walkthrough](artifacts/gate-m2-walkthrough.html).
+
+## Why
+
+<p align="center">
+  <img src="assets/review-by-intent.png" alt="alphabetical order is not a review strategy" width="840">
+</p>
+
+<p align="center">
+  <img src="assets/no-skeletons.png" alt="no skeletons. no spinners. it's just a file." width="840">
+</p>
 
 ## Install
 
