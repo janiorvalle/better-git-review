@@ -1,0 +1,65 @@
+diff --git a/new.txt b/new.txt
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,2 @@
++first
++second
+diff --git a/old.txt b/old.txt
+deleted file mode 100644
+index a1b2c3d..0000000
+--- a/old.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-gone
+-away
+diff --git a/before.go b/after.go
+similarity index 80%
+rename from before.go
+rename to after.go
+index 1111111..2222222 100644
+--- a/before.go
++++ b/after.go
+@@ -10,2 +10,2 @@ func renamed() {
+-	old()
++	new()
+ 	keep()
+diff --git a/image.png b/image.png
+new file mode 100644
+index 0000000..3333333
+Binary files /dev/null and b/image.png differ
+diff --git "a/docs/caf\303\251 guide.md" "b/docs/caf\303\251 guide.md"
+index 4444444..5555555 100644
+--- "a/docs/caf\303\251 guide.md"
++++ "b/docs/caf\303\251 guide.md"
+@@ -1 +1 @@ heading context
+-old title
++new title
+\ No newline at end of file
+diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+diff --git a/file with spaces.txt b/file with spaces.txt
+index 6666666..7777777 100644
+--- a/file with spaces.txt
++++ b/file with spaces.txt
+@@ -1 +1 @@
+-before
++after
+diff --git a/markers.txt b/markers.txt
+index 8888888..9999999 100644
+--- a/markers.txt
++++ b/markers.txt
+@@ -1,2 +1,2 @@
+---- deleted content
+-++++ deleted pluses
+++++ added content
++++++ added pluses
+diff --git a/docs b/file.txt b/docs b/file.txt
+index aaaaaaa..bbbbbbb 100644
+--- a/docs b/file.txt
++++ b/docs b/file.txt
+@@ -1 +1 @@
+-before
++after

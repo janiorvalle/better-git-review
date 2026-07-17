@@ -1,0 +1,20 @@
+diff --git a/viewer.go b/viewer.go
+index 1111111..2222222 100644
+--- a/viewer.go
++++ b/viewer.go
+@@ -1,14 +1,14 @@ renderViewer
+-var mode = "old"
++var mode = "new"
+ var zero = 0
+ var one = 1
+ var two = 2
+ var three = 3
+ var four = 4
+ var five = 5
+ var six = 6
+ var seven = 7
+ var eight = 8
+ var nine = 9
+ var ten = 10
+ var eleven = 11
+ var twelve = 12

@@ -1,0 +1,14 @@
+# binaries
+/better-git-review
+/bgr
+/dist/
+
+# generated walkthroughs
+*.html
+!docs/example-walkthrough.html
+
+# OS noise
+.DS_Store
+
+# local env
+.env
