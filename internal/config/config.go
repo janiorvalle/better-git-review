@@ -25,10 +25,11 @@ type Config struct {
 }
 
 type ProviderConfig struct {
-	Model     string `toml:"model" json:"model,omitempty"`
-	Reasoning string `toml:"reasoning" json:"reasoning,omitempty"`
-	APIKeyEnv string `toml:"api_key_env" json:"api_key_env,omitempty"`
-	BaseURL   string `toml:"base_url" json:"base_url,omitempty"`
+	Model          string `toml:"model" json:"model,omitempty"`
+	Reasoning      string `toml:"reasoning" json:"reasoning,omitempty"`
+	APIKeyEnv      string `toml:"api_key_env" json:"api_key_env,omitempty"`
+	BaseURL        string `toml:"base_url" json:"base_url,omitempty"`
+	AnalysisBudget int    `toml:"analysis_budget" json:"analysis_budget,omitempty"`
 }
 
 type Flags struct {
@@ -164,6 +165,9 @@ func Merge(base, override Config) Config {
 		if providerOverride.BaseURL != "" {
 			current.BaseURL = providerOverride.BaseURL
 		}
+		if providerOverride.AnalysisBudget != 0 {
+			current.AnalysisBudget = providerOverride.AnalysisBudget
+		}
 		result.Providers[name] = current
 	}
 	return result
@@ -226,6 +230,9 @@ func DescribeProviderSettings(cfg Config) string {
 		}
 		if value.BaseURL != "" {
 			lines = append(lines, fmt.Sprintf("base_url = %q", value.BaseURL))
+		}
+		if value.AnalysisBudget != 0 {
+			lines = append(lines, fmt.Sprintf("analysis_budget = %d", value.AnalysisBudget))
 		}
 	}
 	return strings.Join(lines, "\n")

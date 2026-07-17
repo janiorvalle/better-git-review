@@ -170,14 +170,15 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	}
 
 	result, err := analyzeWithCacheStage(ctx, analyzeStageInput{
-		Options:    opts,
-		Env:        env,
-		Collected:  collected,
-		Files:      files,
-		Selection:  selection,
-		Getenv:     os.Getenv,
-		InputIsTTY: stdinIsTTY,
-		Progress:   progress,
+		Options:        opts,
+		Env:            env,
+		Collected:      collected,
+		Files:          files,
+		Selection:      selection,
+		Getenv:         os.Getenv,
+		InputIsTTY:     stdinIsTTY,
+		Progress:       progress,
+		ProviderConfig: loadedConfig.Config.Providers[loadedConfig.Config.Provider],
 	})
 	if err != nil {
 		return err
@@ -260,18 +261,22 @@ func selectStage(
 }
 
 type analyzeStageInput struct {
-	Options    options
-	Env        Environment
-	Collected  source.Result
-	Files      []document.File
-	Selection  provider.Selection
-	Getenv     func(string) string
-	InputIsTTY bool
-	Progress   *terminal.Progress
+	Options        options
+	Env            Environment
+	Collected      source.Result
+	Files          []document.File
+	Selection      provider.Selection
+	Getenv         func(string) string
+	InputIsTTY     bool
+	Progress       *terminal.Progress
+	ProviderConfig config.ProviderConfig
 }
 
 func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (document.Document, error) {
 	providerBudget := provider.AnalysisBudget(ctx, input.Selection.Provider)
+	if input.ProviderConfig.AnalysisBudget > 0 {
+		providerBudget = input.ProviderConfig.AnalysisBudget
+	}
 	stageDecision, err := analyze.DecideStaging(input.Files, input.Getenv, providerBudget)
 	if err != nil {
 		return document.Document{}, err

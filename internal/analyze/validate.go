@@ -10,6 +10,11 @@ import (
 func ApplySeatbelts(analysis document.Analysis, fileCount int) document.Analysis {
 	analysis.StubbedFiles = []int{}
 	analysis.MechanicalFiles = []int{}
+	analysis.FileKeySymbols = make([][]string, fileCount)
+	analysis.StubbedCohorts = []int{}
+	for index := range analysis.FileKeySymbols {
+		analysis.FileKeySymbols[index] = []string{}
+	}
 	seen := make(map[int]bool, fileCount)
 	type retainedCohort struct {
 		cohort document.Cohort
@@ -159,6 +164,29 @@ func ValidateComplete(analysis document.Analysis, fileCount int) []string {
 			errors = append(errors, fmt.Sprintf("file index %d cannot be both stubbed and mechanical", fileIndex))
 		}
 		seenMechanical[fileIndex] = true
+	}
+	if len(analysis.FileKeySymbols) != fileCount {
+		errors = append(errors, "fileKeySymbols must be parallel to files")
+	} else {
+		for index, symbols := range analysis.FileKeySymbols {
+			if symbols == nil {
+				errors = append(errors, fmt.Sprintf("fileKeySymbols[%d] must be present", index))
+			}
+		}
+	}
+	if analysis.StubbedCohorts == nil {
+		errors = append(errors, "stubbedCohorts must be present")
+	}
+	seenCohort := map[int]bool{}
+	for _, cohortIndex := range analysis.StubbedCohorts {
+		if cohortIndex < 0 || cohortIndex >= len(analysis.Cohorts) {
+			errors = append(errors, fmt.Sprintf("stubbedCohorts contains out-of-range index %d", cohortIndex))
+			continue
+		}
+		if seenCohort[cohortIndex] {
+			errors = append(errors, fmt.Sprintf("stubbedCohorts contains duplicate index %d", cohortIndex))
+		}
+		seenCohort[cohortIndex] = true
 	}
 	return errors
 }

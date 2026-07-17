@@ -104,13 +104,14 @@ func TestStagedRenderUsesCompactCanonicalDiffPayload(t *testing.T) {
 	if strings.Contains(extractIsland(t, html), `"hunks":[`) {
 		t.Fatal("metadata island duplicated staged hunks")
 	}
-	if !strings.Contains(html, `Large diff · plain-text rendering`) ||
+	if strings.Count(html, `Large diff · plain-text rendering`) != 1 ||
+		!strings.Contains(html, `id="fidelity-0"`) ||
 		!strings.Contains(html, `data-client-files="0"`) ||
 		!strings.Contains(html, `function makeClientBody(`) {
-		t.Fatal("staged file did not use client row rendering")
+		t.Fatal("small staged file did not use planned full-fidelity rendering")
 	}
-	if strings.Count(html, `\u003c/script`) < 2 {
-		t.Fatal("compact diff payload did not safely encode script delimiters")
+	if !strings.Contains(html, `&lt;/script&gt;`) {
+		t.Fatal("full-fidelity rows did not safely escape script delimiters")
 	}
 }
 

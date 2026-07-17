@@ -290,14 +290,17 @@ button { font: inherit; }
 .viewed-switch.on { color: var(--ok); }
 .file.viewed .file-header { opacity: .75; }
 .file-summary { padding: 10px 14px; border-bottom: 1px solid var(--border-muted); color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.symbol-list { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 14px 10px; border-bottom: 1px solid var(--border-muted); }
+.symbol-chip { border: 1px solid var(--border); background: var(--surface-soft); color: var(--text); padding: 2px 6px; font: 11px/1.4 var(--mono); }
 .file-stub { padding: 8px 14px; border-bottom: 1px solid var(--note-border); background: var(--note-bg); color: var(--note-fg); font-size: 12px; font-weight: 600; }
+.cohort-stub { margin: 12px 0; padding: 8px 12px; border: 1px solid var(--note-border); background: var(--note-bg); color: var(--note-fg); font-size: 12px; font-weight: 600; }
 .file-mechanical { padding: 8px 14px; border-bottom: 1px solid var(--border-muted); background: var(--canvas-inset); color: var(--muted); font-size: 12px; font-weight: 600; }
 .bulk-render-note { padding: 6px 14px; border-bottom: 1px solid var(--border-muted); background: var(--canvas-inset); color: var(--muted); font-size: 11px; }
 .mechanical-list { max-width: 980px; margin: 0 0 22px; border: 1px solid var(--border-muted); background: var(--panel); border-radius: 8px; }
 .mechanical-list summary { cursor: pointer; padding: 10px 14px; color: var(--muted); font-weight: 600; }
 .mechanical-list ul { max-height: 280px; overflow: auto; margin: 0; padding: 0 14px 12px 34px; }
 .mechanical-list li { padding: 2px 0; color: var(--text-soft); font: 12px var(--mono); overflow-wrap: anywhere; }
-.file.collapsed .file-body, .file.collapsed .file-summary, .file.collapsed .file-stub, .file.collapsed .file-mechanical { display: none; }
+.file.collapsed .file-body, .file.collapsed .file-summary, .file.collapsed .symbol-list, .file.collapsed .file-stub, .file.collapsed .file-mechanical { display: none; }
 .binary { padding: 24px; color: var(--muted); text-align: center; font-family: var(--mono); }
 .binary-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: var(--canvas-inset); }
 .binary-pane { min-width: 0; min-height: 220px; display: grid; grid-template-rows: minmax(180px, 1fr) auto; border-right: 1px solid var(--border-muted); }
@@ -462,6 +465,7 @@ body[data-view="split"] .view-split { display: block; }
           <p class="intent">{{.Intent}}</p>
           {{if .Dependencies}}<div class="dependencies">{{range .Dependencies}}<button class="dependency-chip" type="button" data-step-target="{{.StepIndex}}">⛓ Depends on · {{.Title}}</button>{{end}}</div>{{end}}
           <div class="narrative">{{.Narrative}}</div>
+          {{if .Stubbed}}<div class="cohort-stub">No model narration was available for this step.</div>{{end}}
           {{if .ReviewNotes}}<div class="review-notes"><h3>⚠ Worth double-checking</h3><ul>{{range .ReviewNotes}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
           {{if $.ClientFileCards}}
           <div class="file-list" data-client-files="{{.FileList}}"></div>
@@ -478,6 +482,7 @@ body[data-view="split"] .view-split { display: block; }
               <button type="button" class="viewed-switch" data-viewed-file="{{$file.Index}}" role="switch" aria-checked="false"><span class="track" aria-hidden="true"></span>Viewed</button>
             </header>
             {{if $file.Summary}}<div class="file-summary">{{$file.Summary}}</div>{{end}}
+            {{if $file.KeySymbols}}<div class="symbol-list">{{range $file.KeySymbols}}<span class="symbol-chip">{{.}}</span>{{end}}</div>{{end}}
             {{if $file.Stubbed}}<div class="file-stub">No model summary - grouped from path only.</div>{{end}}
             {{if $file.Mechanical}}<div class="file-mechanical">Generated / auto-summarized - model analysis intentionally skipped.</div>{{end}}
             <template class="file-body-template">
@@ -531,6 +536,7 @@ body[data-view="split"] .view-split { display: block; }
     </main>
   </div>
 </div>
+{{range .FidelityFiles}}<template id="fidelity-{{.Index}}">{{.HTML}}</template>{{end}}
 <script id="walkthrough-data" type="application/json">{{.JSON}}</script>
 <script id="diff-data" type="application/json">{{.DiffJSON}}</script>
 <script>
@@ -538,7 +544,7 @@ document.addEventListener("DOMContentLoaded", function () {
   var steps = Array.from(document.querySelectorAll(".step"));
   var navButtons = Array.from(document.querySelectorAll(".step-nav-button"));
   var current = 0;
-  var viewerDocument = { files: [], analysis: { cohorts: [], stubbedFiles: [], mechanicalFiles: [] } };
+  var viewerDocument = { files: [], analysis: { cohorts: [], stubbedFiles: [], mechanicalFiles: [], fileKeySymbols: [], stubbedCohorts: [] } };
   var diffPayload = { f: [], u: [] };
   try { viewerDocument = JSON.parse(document.getElementById("walkthrough-data").textContent || '{}'); } catch (_) {}
   try { diffPayload = JSON.parse(document.getElementById("diff-data").textContent || '{"f":[],"u":[]}'); } catch (_) {}
@@ -557,6 +563,7 @@ document.addEventListener("DOMContentLoaded", function () {
   });
   var stubbedFiles = new Set(viewerDocument.analysis.stubbedFiles || []);
   var mechanicalFiles = new Set(viewerDocument.analysis.mechanicalFiles || []);
+  var fileKeySymbols = viewerDocument.analysis.fileKeySymbols || [];
   var storedView = "unified";
   try { storedView = localStorage.getItem("better-git-review-view") || "unified"; } catch (_) {}
 
@@ -649,7 +656,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     container.appendChild(pane);
   }
-  function makeClientBody(fileData, uiData) {
+  function makeClientBody(fileIndex, fileData, uiData) {
     var bodyTemplate = makeElement("template", "file-body-template");
     var body = makeElement("div", "file-body");
     if (fileData.binary) {
@@ -662,6 +669,12 @@ document.addEventListener("DOMContentLoaded", function () {
       } else {
         body.appendChild(makeElement("div", "binary", uiData[1] || "Binary file"));
       }
+    } else if (document.getElementById("fidelity-" + fileIndex)) {
+      var fidelityTemplate = document.getElementById("fidelity-" + fileIndex);
+      body.appendChild(fidelityTemplate.content.cloneNode(true));
+      var fidelitySplit = makeElement("div", "view-split diff-scroll");
+      fidelitySplit.dataset.splitReady = "false";
+      body.appendChild(fidelitySplit);
     } else {
       body.appendChild(makeElement("div", "bulk-render-note", "Large diff · plain-text rendering"));
       var unified = makeElement("div", "view-unified diff-scroll");
@@ -723,9 +736,15 @@ document.addEventListener("DOMContentLoaded", function () {
     header.appendChild(viewedButton);
     card.appendChild(header);
     if (details.summary) card.appendChild(makeElement("div", "file-summary", details.summary));
+    var symbols = (fileKeySymbols[fileIndex] || []).slice(0, 5);
+    if (symbols.length) {
+      var symbolList = makeElement("div", "symbol-list");
+      symbols.forEach(function (symbol) { symbolList.appendChild(makeElement("span", "symbol-chip", symbol)); });
+      card.appendChild(symbolList);
+    }
     if (stubbedFiles.has(fileIndex)) card.appendChild(makeElement("div", "file-stub", "No model summary - grouped from path only."));
     if (mechanicalFiles.has(fileIndex)) card.appendChild(makeElement("div", "file-mechanical", "Generated / auto-summarized - model analysis intentionally skipped."));
-    card.append(makeClientBody(fileData, uiData), makeElement("div", "file-body-slot"));
+    card.append(makeClientBody(fileIndex, fileData, uiData), makeElement("div", "file-body-slot"));
     return card;
   }
   function ensureStepFiles(section) {

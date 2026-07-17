@@ -181,7 +181,34 @@ func TestAssembleStagedAnalysisPreservesMechanicalAndStubProvenance(t *testing.T
 		t.Fatalf("provenance = stubbed %#v mechanical %#v",
 			analysis.StubbedFiles, analysis.MechanicalFiles)
 	}
+	if !slices.Equal(analysis.FileKeySymbols[0], []string{}) ||
+		!slices.Equal(analysis.FileKeySymbols[1], []string{}) {
+		t.Fatalf("key symbols = %#v", analysis.FileKeySymbols)
+	}
 	if errors := ValidateComplete(analysis, len(files)); len(errors) > 0 {
 		t.Fatalf("assembled analysis is invalid: %#v", errors)
+	}
+}
+
+func TestAssembleStagedAnalysisPopulatesKeySymbolsByProvenance(t *testing.T) {
+	files := []document.File{{Path: "model.go"}, {Path: "stub.go"}, {Path: "generated.go"}}
+	plan := PlanStaged(files, map[int]bool{2: true}, false, DefaultStageBudget)
+	summaries := []FileSummary{
+		{Summary: "model", KeySymbols: []string{"CompareToken"}},
+		stubSummary(files[1]),
+		mechanicalSummary(files[2], "generated"),
+	}
+	narrations := make([]CohortNarration, len(plan.Cohorts))
+	for index := range narrations {
+		narrations[index] = CohortNarration{
+			Title: "Changes", Intent: "Review.", Narrative: "Review changes.", ReviewNotes: []string{},
+		}
+	}
+	analysis := AssembleStagedAnalysis(files, plan, summaries, narrations, Synthesis{
+		Title: "Change", Overview: "Overview",
+	})
+	if !slices.Equal(analysis.FileKeySymbols[0], []string{"CompareToken"}) ||
+		len(analysis.FileKeySymbols[1]) != 0 || len(analysis.FileKeySymbols[2]) != 0 {
+		t.Fatalf("fileKeySymbols = %#v", analysis.FileKeySymbols)
 	}
 }

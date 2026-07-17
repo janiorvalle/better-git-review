@@ -120,6 +120,8 @@ func TestValidateCompleteRequiresStubbedFiles(t *testing.T) {
 	}
 	analysis.StubbedFiles = []int{}
 	analysis.MechanicalFiles = []int{}
+	analysis.FileKeySymbols = [][]string{{}, {}}
+	analysis.StubbedCohorts = []int{}
 	if errors := ValidateComplete(analysis, 2); len(errors) != 0 {
 		t.Fatalf("empty provenance arrays should be valid: %#v", errors)
 	}

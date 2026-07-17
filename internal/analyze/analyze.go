@@ -217,6 +217,7 @@ func runStaged(
 
 	logf("narrating %d deterministic cohorts", len(plan.Cohorts))
 	narrations := make([]CohortNarration, len(plan.Cohorts))
+	stubbedCohorts := []int{}
 	for cohortIndex, cohort := range plan.Cohorts {
 		digest := BuildCohortDigest(
 			opts.Files,
@@ -226,7 +227,7 @@ func runStaged(
 			cohortDigestBudget(opts.Budget, cohort, delimiters),
 		)
 		prompt := BuildCohortNarrationPrompt(cohort, digest, delimiters)
-		narration, raw, validationErrors, err := runStageAttempts(
+		narration, _, _, err := runStageAttempts(
 			ctx,
 			opts.Provider,
 			prompt,
@@ -237,7 +238,12 @@ func runStaged(
 			logf,
 		)
 		if err != nil {
-			return document.Analysis{}, analysisFailure(opts.StateDir, raw, validationErrors, err)
+			if ctx.Err() != nil {
+				return document.Analysis{}, ctx.Err()
+			}
+			logf("cohort %d narration failed; using deterministic stub: %v", cohortIndex+1, err)
+			narration = stubCohortNarration(opts.Files, cohort)
+			stubbedCohorts = append(stubbedCohorts, cohortIndex)
 		}
 		narrations[cohortIndex] = narration
 	}
@@ -258,6 +264,7 @@ func runStaged(
 	}
 
 	analysis := AssembleStagedAnalysis(opts.Files, *plan, summaries, narrations, synthesis)
+	analysis.StubbedCohorts = stubbedCohorts
 	if validationErrors := ValidateComplete(analysis, len(opts.Files)); len(validationErrors) > 0 {
 		return document.Analysis{}, fmt.Errorf(
 			"internal staged assembly invariant failed: %s", FormatErrors(validationErrors))
@@ -470,6 +477,22 @@ func mechanicalSummary(file document.File, reason string) FileSummary {
 			file.Path, reason),
 		LayerHint:  pathlayer.Classify(file.Path),
 		KeySymbols: []string{},
+	}
+}
+
+func stubCohortNarration(files []document.File, cohort PlannedCohort) CohortNarration {
+	additions, deletions := 0, 0
+	for _, index := range cohort.Files {
+		additions += files[index].Additions
+		deletions += files[index].Deletions
+	}
+	return CohortNarration{
+		Title: cohort.Title,
+		Intent: fmt.Sprintf("%d files, +%d/-%d; no model narration was available.",
+			len(cohort.Files), additions, deletions),
+		Narrative: fmt.Sprintf("%d files, +%d/-%d; no model narration was available.",
+			len(cohort.Files), additions, deletions),
+		ReviewNotes: []string{},
 	}
 }
 

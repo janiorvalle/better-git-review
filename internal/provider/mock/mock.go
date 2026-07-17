@@ -50,6 +50,9 @@ func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
 		return `{"title":"[MOCK] Guided review","overview":"Mock staged analysis: deterministic cohorts with bounded narration."}`, nil
 	}
 	if strings.Contains(prompt, "STAGE: COHORT_NARRATE") {
+		if failure := p.getenv("BGR_MOCK_FAIL_NARRATION"); failure != "" && strings.Contains(prompt, failure) {
+			return `{"title":`, nil
+		}
 		return `{"title":"[mock] Cohort","intent":"[mock] Review the deterministically grouped files.","narrative":"[mock mode] This bounded narration was produced without an LLM.","reviewNotes":[]}`, nil
 	}
 	type promptFile struct {
@@ -84,7 +87,7 @@ func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
 				"index":      file.index,
 				"summary":    fmt.Sprintf("[mock] %s, +%s/-%s", file.status, file.additions, file.deletions),
 				"layerHint":  pathlayer.Classify(file.path),
-				"keySymbols": []string{},
+				"keySymbols": []string{"mock:" + file.path},
 			})
 		}
 		return string(mustJSON(result)), nil
