@@ -233,3 +233,40 @@ func extractIsland(t *testing.T, html string) string {
 	}
 	return html[start : start+end]
 }
+
+func TestRenderShipsKeyboardReviewFlow(t *testing.T) {
+	doc := document.Document{
+		SchemaVersion: document.SchemaVersion,
+		Source:        document.Source{Title: "Keys", Range: "main...head"},
+		Files: []document.File{
+			{Path: "a.go", Status: "modified", Additions: 1, Hunks: []document.Hunk{{
+				Lines: []document.HunkLine{{Type: "a", New: 1, Text: "package a"}},
+			}}},
+		},
+		Analysis: document.Analysis{
+			Title: "Keys", Overview: "Keyboard flow",
+			Cohorts: []document.Cohort{{
+				Title: "Files", Layer: "backend", Intent: "Review", Narrative: "Review",
+				Files: []int{0}, FileSummaries: []string{"a"},
+				ReviewNotes: []string{}, DependsOn: []int{},
+			}},
+			StubbedFiles: []int{}, MechanicalFiles: []int{},
+		},
+	}
+	output, err := Render(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(output)
+	for _, marker := range []string{
+		"<kbd>j</kbd><kbd>k</kbd><kbd>v</kbd>",
+		"function moveActiveFile(",
+		"function jumpToNextUnreviewed(",
+		"function toggleViewedCard(",
+		"kbd-active",
+	} {
+		if !strings.Contains(html, marker) {
+			t.Fatalf("rendered page is missing keyboard-flow marker %q", marker)
+		}
+	}
+}
