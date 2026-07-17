@@ -46,6 +46,12 @@ func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
 	if err := p.recordPrompt(prompt); err != nil {
 		return "", err
 	}
+	if strings.Contains(prompt, "STAGE: SYNTHESIS") {
+		return `{"title":"[MOCK] Guided review","overview":"Mock staged analysis: deterministic cohorts with bounded narration."}`, nil
+	}
+	if strings.Contains(prompt, "STAGE: COHORT_NARRATE") {
+		return `{"title":"[mock] Cohort","intent":"[mock] Review the deterministically grouped files.","narrative":"[mock mode] This bounded narration was produced without an LLM.","reviewNotes":[]}`, nil
+	}
 	type promptFile struct {
 		index     int
 		path      string
@@ -68,16 +74,20 @@ func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
 	if len(files) == 0 {
 		return "", fmt.Errorf("mock provider could not find files in analysis prompt")
 	}
-	if strings.Contains(prompt, "STAGE: FILE_SUMMARY") {
-		file := files[0]
-		if failure := p.getenv("BGR_MOCK_FAIL_SUMMARY"); failure != "" && strings.Contains(file.path, failure) {
-			return `{"summary":`, nil
+	if strings.Contains(prompt, "STAGE: SUMMARY_BATCH") {
+		result := make([]map[string]any, 0, len(files))
+		for _, file := range files {
+			if failure := p.getenv("BGR_MOCK_FAIL_SUMMARY"); failure != "" && strings.Contains(file.path, failure) {
+				return `[{"index":`, nil
+			}
+			result = append(result, map[string]any{
+				"index":      file.index,
+				"summary":    fmt.Sprintf("[mock] %s, +%s/-%s", file.status, file.additions, file.deletions),
+				"layerHint":  pathlayer.Classify(file.path),
+				"keySymbols": []string{},
+			})
 		}
-		return string(mustJSON(map[string]any{
-			"summary":    fmt.Sprintf("[mock] %s, +%s/-%s", file.status, file.additions, file.deletions),
-			"layerHint":  pathlayer.Classify(file.path),
-			"keySymbols": []string{},
-		})), nil
+		return string(mustJSON(result)), nil
 	}
 	groups := map[string][]promptFile{}
 	for _, file := range files {

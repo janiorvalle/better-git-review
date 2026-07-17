@@ -119,6 +119,7 @@ Linux, `%APPDATA%\better-git-review\config.toml` on Windows. Repos can add a
 ```toml
 provider = "openrouter"
 auto_open = true
+include_mechanical = false
 
 [providers.openrouter]
 model = "z-ai/glm-5.2"
@@ -136,25 +137,32 @@ Never put an API key in config — `api_key_env` names the environment
 variable that holds it.
 
 One deliberate speed bump: repo config that wants to change your provider,
-endpoint, or key variable isn't trusted automatically. You'll see exactly
-what it wants and confirm once; if those settings change later, you'll be
-asked again. A cloned repo shouldn't get to silently redirect your diffs.
+endpoint, key variable, or mechanical-file selection isn't trusted
+automatically. You'll see exactly what it wants and confirm once; if those
+settings change later, you'll be asked again. A cloned repo shouldn't get
+to silently redirect your diffs or expand model spend.
 Non-interactive runs pass `--trust-repo-config` or `--yes`.
 
 ## Cost, caching, and big diffs
 
-Analysis is cached on the diff content, provider, model, and reasoning
-level — re-running an unchanged diff is instant and free. `--no-cache`
-forces a fresh pass.
+Analysis is cached on the diff content, provider, model, reasoning level,
+analysis budget, and mechanical-file selection — re-running an unchanged
+diff is instant and free. `--no-cache` forces a fresh pass.
 
-Small diffs are one model call. Diffs too big for one pass get staged:
-files summarized concurrently, then clustered in a final call. The HTML
-always carries the complete diffs either way, and a file whose summary
-fails twice shows up visibly flagged rather than silently guessed.
+Diffs of up to 150 files are one model call when they fit the selected
+model's input budget. Anything larger by characters or file count gets staged:
+provably mechanical files (exact renames, repository-attested generated
+files, and binaries) are kept in the walkthrough without spending model
+calls; the rest are summarized in bounded batches. Go assigns every file
+to deterministic directory cohorts, each cohort gets one bounded
+narration, and one final call synthesizes the overview. `--include-mechanical`
+or `include_mechanical = true` opts every file back into model analysis.
+The HTML always carries the complete diffs either way.
 
-Any plan over five calls tells you what it's about to spend — provider,
-model, call count, worst-case retries — and asks first. Scripts pass
-`--yes`.
+Any plan over five calls tells you the exact planned count — the same
+immutable batch/cohort plan the executor uses — and asks first. A failed
+summary batch retries once, then every file in that batch is visibly
+stubbed without changing the remaining schedule. Scripts pass `--yes`.
 
 ## Agents
 

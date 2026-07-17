@@ -290,7 +290,12 @@ button { font: inherit; }
 .file.viewed .file-header { opacity: .75; }
 .file-summary { padding: 10px 14px; border-bottom: 1px solid var(--border-muted); color: var(--muted); font-size: 13.5px; line-height: 1.55; }
 .file-stub { padding: 8px 14px; border-bottom: 1px solid var(--note-border); background: var(--note-bg); color: var(--note-fg); font-size: 12px; font-weight: 600; }
-.file.collapsed .file-body, .file.collapsed .file-summary, .file.collapsed .file-stub { display: none; }
+.file-mechanical { padding: 8px 14px; border-bottom: 1px solid var(--border-muted); background: var(--canvas-inset); color: var(--muted); font-size: 12px; font-weight: 600; }
+.mechanical-list { max-width: 980px; margin: 0 0 22px; border: 1px solid var(--border-muted); background: var(--panel); border-radius: 8px; }
+.mechanical-list summary { cursor: pointer; padding: 10px 14px; color: var(--muted); font-weight: 600; }
+.mechanical-list ul { max-height: 280px; overflow: auto; margin: 0; padding: 0 14px 12px 34px; }
+.mechanical-list li { padding: 2px 0; color: var(--text-soft); font: 12px var(--mono); overflow-wrap: anywhere; }
+.file.collapsed .file-body, .file.collapsed .file-summary, .file.collapsed .file-stub, .file.collapsed .file-mechanical { display: none; }
 .binary { padding: 24px; color: var(--muted); text-align: center; font-family: var(--mono); }
 .binary-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: var(--canvas-inset); }
 .binary-pane { min-width: 0; min-height: 220px; display: grid; grid-template-rows: minmax(180px, 1fr) auto; border-right: 1px solid var(--border-muted); }
@@ -434,8 +439,10 @@ body[data-view="split"] .view-split { display: block; }
             <span class="stat-pill plus">+{{$.Additions}}</span>
             <span class="stat-pill minus">−{{$.Deletions}}</span>
             <span class="stat-pill">{{$.CohortCount}} steps</span>
+            {{if $.MechanicalCount}}<span class="stat-pill">{{$.MechanicalCount}} mechanical</span>{{end}}
           </div>
           <div class="overview-text">{{$.Overview}}</div>
+          {{if $.MechanicalCount}}<details class="mechanical-list"><summary>{{$.MechanicalCount}} generated / auto-summarized file{{if ne $.MechanicalCount 1}}s{{end}}</summary><ul>{{range $.MechanicalFiles}}<li>{{.Path}} ({{.Status}})</li>{{end}}</ul></details>{{end}}
           {{with $.Diagram}}<div class="diagram">{{.}}</div>{{end}}
           <div class="toc">
             {{range $step := $.Steps}}{{if not $step.IsOverview}}
@@ -466,6 +473,7 @@ body[data-view="split"] .view-split { display: block; }
             </header>
             {{if $file.Summary}}<div class="file-summary">{{$file.Summary}}</div>{{end}}
             {{if $file.Stubbed}}<div class="file-stub">No model summary - grouped from path only.</div>{{end}}
+            {{if $file.Mechanical}}<div class="file-mechanical">Generated / auto-summarized - model analysis intentionally skipped.</div>{{end}}
             <div class="file-body">
               {{if $file.Binary}}
                 {{if $file.ImagePreview}}<div class="binary-preview">

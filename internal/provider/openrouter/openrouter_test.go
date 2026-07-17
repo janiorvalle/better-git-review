@@ -157,6 +157,9 @@ func TestLiveCatalogShapeAndPerModelReasoning(t *testing.T) {
 	if len(levels) != 2 || levels[0] != "xhigh" || levels[1] != "high" {
 		t.Fatalf("levels = %#v", levels)
 	}
+	if budget := client.AnalysisBudget(context.Background()); budget != 2_200_000 {
+		t.Fatalf("live analysis budget = %d", budget)
+	}
 }
 
 func TestCatalogFallsBackWhenRemoteIsUnavailable(t *testing.T) {
@@ -171,6 +174,17 @@ func TestCatalogFallsBackWhenRemoteIsUnavailable(t *testing.T) {
 	}
 	if len(models) == 0 || models[0].ID != "z-ai/glm-5.2" || !models[0].Default {
 		t.Fatalf("fallback models = %#v", models)
+	}
+	client.Model = "z-ai/glm-5.2"
+	if budget := client.AnalysisBudget(context.Background()); budget != 2_000_000 {
+		t.Fatalf("curated analysis budget = %d", budget)
+	}
+}
+
+func TestUnknownModelBudgetNeverGuessesUpward(t *testing.T) {
+	client := &Client{Model: "future/model", contextByModel: map[string]int{}}
+	if budget := client.AnalysisBudget(context.Background()); budget != provider.DefaultAnalysisBudget {
+		t.Fatalf("unknown analysis budget = %d", budget)
 	}
 }
 

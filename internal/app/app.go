@@ -23,6 +23,7 @@ import (
 	configureflow "github.com/janiorvalle/better-git-review/internal/configure"
 	"github.com/janiorvalle/better-git-review/internal/diff"
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/gitattr"
 	"github.com/janiorvalle/better-git-review/internal/guard"
 	"github.com/janiorvalle/better-git-review/internal/media"
 	"github.com/janiorvalle/better-git-review/internal/picker"
@@ -42,28 +43,29 @@ type Environment struct {
 }
 
 type options struct {
-	PR              string
-	DiffFile        string
-	Base            string
-	Head            string
-	Commit          string
-	RepoDir         string
-	Provider        string
-	Model           string
-	Reasoning       string
-	Out             string
-	Format          string
-	Open            bool
-	NoOpen          bool
-	Dirty           bool
-	NoCache         bool
-	Yes             bool
-	TrustRepoConfig bool
-	Version         bool
-	Interactive     bool
-	PickerQuery     string
-	ArgsPresent     bool
-	Configure       bool
+	PR                string
+	DiffFile          string
+	Base              string
+	Head              string
+	Commit            string
+	RepoDir           string
+	Provider          string
+	Model             string
+	Reasoning         string
+	Out               string
+	Format            string
+	Open              bool
+	NoOpen            bool
+	Dirty             bool
+	NoCache           bool
+	Yes               bool
+	TrustRepoConfig   bool
+	IncludeMechanical bool
+	Version           bool
+	Interactive       bool
+	PickerQuery       string
+	ArgsPresent       bool
+	Configure         bool
 }
 
 func Run(ctx context.Context, args []string, env Environment) error {
@@ -121,6 +123,9 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	})
 	if err != nil {
 		return err
+	}
+	if loadedConfig.Config.IncludeMechanical != nil && *loadedConfig.Config.IncludeMechanical {
+		opts.IncludeMechanical = true
 	}
 	progress := terminal.New(env.Stderr, stderrIsTTY, os.Getenv("NO_COLOR") != "")
 
@@ -266,13 +271,40 @@ type analyzeStageInput struct {
 }
 
 func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (document.Document, error) {
-	stageDecision, err := analyze.DecideStaging(input.Files, input.Getenv)
+	providerBudget := provider.AnalysisBudget(ctx, input.Selection.Provider)
+	stageDecision, err := analyze.DecideStaging(input.Files, input.Getenv, providerBudget)
 	if err != nil {
 		return document.Document{}, err
 	}
+	plannedCalls := 1
+	var stagedPlan *analyze.StagedPlan
 	if stageDecision.Staged {
-		input.Progress.Logf("big diff - roughly %.1fx the single-pass budget, so files get summarized first",
-			float64(stageDecision.InputBytes)/float64(stageDecision.Budget))
+		if len(input.Files) > analyze.CohortMaxFiles && stageDecision.InputBytes <= stageDecision.Budget {
+			input.Progress.Logf("big diff - %d files exceeds the %d-file single-pass output limit, using staged analysis",
+				len(input.Files), analyze.CohortMaxFiles)
+		} else {
+			input.Progress.Logf("big diff - roughly %.1fx the %d-char model budget, using staged analysis",
+				float64(stageDecision.InputBytes)/float64(stageDecision.Budget), stageDecision.Budget)
+		}
+		attributeRef := input.Collected.HeadRef
+		if attributeRef == "WORKTREE" {
+			attributeRef = input.Collected.BaseRef
+		}
+		generated := gitattr.Generated(
+			ctx,
+			input.Collected.Source.RepoDir,
+			attributeRef,
+			input.Files,
+			nil,
+			input.Progress.Logf,
+		)
+		plan := analyze.PlanStaged(input.Files, generated, input.Options.IncludeMechanical, stageDecision.Budget)
+		stagedPlan = &plan
+		plannedCalls = plan.Calls
+		input.Progress.Logf(
+			"planned %d summary batches + %d cohort narrations + 1 synthesis (%d mechanical files skipped)",
+			len(plan.SummaryBatches), len(plan.Cohorts), len(plan.Triage.Mechanical),
+		)
 	}
 
 	cacheStore, err := cache.Default(validateCachedDocument)
@@ -285,6 +317,14 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 		input.Selection.Model,
 		input.Selection.Reasoning,
 		document.SchemaVersion,
+		fmt.Sprintf("budget=%d", stageDecision.Budget),
+		fmt.Sprintf("include-mechanical=%t", input.Options.IncludeMechanical),
+		fmt.Sprintf("mechanical=%v", func() []int {
+			if stagedPlan == nil {
+				return nil
+			}
+			return stagedPlan.Triage.Mechanical
+		}()),
 	)
 	var result document.Document
 	analysisPerformed := false
@@ -300,8 +340,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 		analysisPerformed = true
 		if err := guard.Confirm(
 			guard.AnalysisPlan(
-				len(input.Files),
-				stageDecision.Staged,
+				plannedCalls,
 				input.Selection.Provider.Name(),
 				input.Selection.Model,
 				input.Selection.Reasoning,
@@ -324,6 +363,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 			},
 			Staged: stageDecision.Staged,
 			Budget: stageDecision.Budget,
+			Plan:   stagedPlan,
 		})
 		analysisDuration := spinner.Stop()
 		if analysisErr != nil {
@@ -440,6 +480,7 @@ func parseArgs(args []string, env Environment) (options, error) {
 	flags.BoolVar(&result.NoCache, "no-cache", false, "bypass analysis cache")
 	flags.BoolVar(&result.Yes, "yes", false, "skip confirmations")
 	flags.BoolVar(&result.TrustRepoConfig, "trust-repo-config", false, "trust current repo provider config")
+	flags.BoolVar(&result.IncludeMechanical, "include-mechanical", false, "include generated, binary, and exact-rename files in model analysis")
 	flags.BoolVar(&result.Version, "version", false, "print version")
 	flags.BoolVar(&result.Interactive, "i", false, "interactively choose what to review")
 	flags.BoolVar(&result.Interactive, "interactive", false, "interactively choose what to review")
@@ -653,6 +694,7 @@ FLAGS
 	--open                 Force opening generated HTML
 	--no-open              Do not open generated HTML in a TTY
   --no-cache             Bypass the analysis cache
+  --include-mechanical   Include provably mechanical files in model analysis
   --yes                  Skip interactive confirmations
   --trust-repo-config    Trust the current repo provider config fingerprint
   --version              Print version

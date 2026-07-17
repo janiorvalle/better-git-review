@@ -100,6 +100,14 @@ func TestFingerprintStableAndChanges(t *testing.T) {
 	}
 }
 
+func TestMergeIncludeMechanicalUsesExplicitOverride(t *testing.T) {
+	enabled, disabled := true, false
+	got := Merge(Config{IncludeMechanical: &enabled}, Config{IncludeMechanical: &disabled})
+	if got.IncludeMechanical == nil || *got.IncludeMechanical {
+		t.Fatalf("include_mechanical override = %#v", got.IncludeMechanical)
+	}
+}
+
 func TestDescribeProviderSettingsEscapesControlCharacters(t *testing.T) {
 	description := DescribeProviderSettings(Config{
 		Providers: map[string]ProviderConfig{

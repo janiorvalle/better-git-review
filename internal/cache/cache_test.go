@@ -41,7 +41,7 @@ func TestCacheRoundTripAndCorruption(t *testing.T) {
 		SchemaVersion: document.SchemaVersion,
 		Files:         []document.File{{Path: "a.go"}},
 		Analysis: document.Analysis{
-			Title: "Change", Overview: "Overview", StubbedFiles: []int{},
+			Title: "Change", Overview: "Overview", StubbedFiles: []int{}, MechanicalFiles: []int{},
 			Cohorts: []document.Cohort{{
 				Title: "Backend", Layer: "backend", Intent: "Change backend", Narrative: "Review the backend change.",
 				Files:         []int{0},

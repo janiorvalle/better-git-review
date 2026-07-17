@@ -21,6 +21,21 @@ type StructuredProvider interface {
 	CompleteStructured(ctx context.Context, prompt string, schema json.RawMessage) (json.RawMessage, error)
 }
 
+const DefaultAnalysisBudget = 160_000
+
+type AnalysisBudgeter interface {
+	AnalysisBudget(context.Context) int
+}
+
+func AnalysisBudget(ctx context.Context, selected Provider) int {
+	if budgeter, ok := selected.(AnalysisBudgeter); ok {
+		if budget := budgeter.AnalysisBudget(ctx); budget > 0 {
+			return budget
+		}
+	}
+	return DefaultAnalysisBudget
+}
+
 type ModelOption struct {
 	ID      string
 	Label   string

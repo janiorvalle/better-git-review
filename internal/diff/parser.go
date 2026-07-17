@@ -64,6 +64,15 @@ func Parse(text string) ([]document.File, error) {
 			file.NewPath = parseMetadataPath(strings.TrimPrefix(line, "rename to "))
 			file.Path = file.NewPath
 			continue
+		case strings.HasPrefix(line, "similarity index "):
+			value := strings.TrimSuffix(strings.TrimPrefix(line, "similarity index "), "%")
+			if similarity, err := strconv.Atoi(value); err == nil {
+				file.Similarity = similarity
+			}
+			continue
+		case strings.HasPrefix(line, "old mode "), strings.HasPrefix(line, "new mode "):
+			file.ModeChanged = true
+			continue
 		case strings.HasPrefix(line, "Binary files "), line == "GIT binary patch":
 			file.Binary = true
 			continue

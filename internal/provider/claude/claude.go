@@ -43,6 +43,15 @@ type CLI struct {
 
 func (p *CLI) Name() string { return "claude-cli" }
 
+func (p *CLI) AnalysisBudget(context.Context) int {
+	switch p.Model {
+	case "sonnet", "opus", "haiku":
+		return 400_000
+	default:
+		return provider.DefaultAnalysisBudget
+	}
+}
+
 func (p *CLI) Detect() (bool, string) {
 	path, err := exec.LookPath("claude")
 	if err != nil {

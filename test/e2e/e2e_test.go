@@ -57,7 +57,7 @@ func TestHappyPath(t *testing.T) {
 	if doc.Meta.Cached {
 		t.Fatal("first run should not be cached")
 	}
-	if doc.Meta.Provider != "mock" || doc.SchemaVersion != 4 {
+	if doc.Meta.Provider != "mock" || doc.SchemaVersion != document.SchemaVersion {
 		t.Fatalf("unexpected metadata: %#v", doc.Meta)
 	}
 	if doc.Meta.Staged {
@@ -132,7 +132,7 @@ func TestFormatJSON(t *testing.T) {
 		t.Fatal("--format json wrote HTML")
 	}
 	doc := readAndValidate(t, output)
-	if doc.SchemaVersion != 4 {
+	if doc.SchemaVersion != document.SchemaVersion {
 		t.Fatalf("schema version = %d", doc.SchemaVersion)
 	}
 	if doc.Meta.Staged || doc.Analysis.StubbedFiles == nil || len(doc.Analysis.StubbedFiles) != 0 {
@@ -170,7 +170,9 @@ func TestStagedStubDegradation(t *testing.T) {
 	}
 	html, doc := readHTMLDocument(t, output)
 	if len(doc.Analysis.StubbedFiles) != 1 ||
-		doc.Files[doc.Analysis.StubbedFiles[0]].Path != "internal/service_test.go" {
+		!slices.ContainsFunc(doc.Analysis.StubbedFiles, func(index int) bool {
+			return doc.Files[index].Path == "internal/service_test.go"
+		}) {
 		t.Fatalf("unexpected stubbed files: %#v", doc.Analysis.StubbedFiles)
 	}
 	if !strings.Contains(html, "No model summary - grouped from path only.") {
@@ -179,15 +181,16 @@ func TestStagedStubDegradation(t *testing.T) {
 }
 
 func TestStagedCostGuard(t *testing.T) {
-	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	env := isolatedEnvironment(t)
+	promptLog := filepath.Join(t.TempDir(), "calls.log")
+	env = setEnv(env, "BGR_MOCK_PROMPT_LOG", promptLog)
 	output := filepath.Join(t.TempDir(), "guard.json")
 	args := []string{
-		"--diff", stagedFixturePath(t), "--provider", "mock",
+		"--diff", manyFilesFixturePath(t, 151), "--provider", "mock",
 		"--format", "json", "--out", output,
 	}
 	refused := runCLI(t, env, nil, args...)
-	assertFailureContains(t, refused, "7 model calls")
-	assertFailureContains(t, refused, "up to 14")
+	assertFailureContains(t, refused, "fixed plan has exactly 10 model calls")
 	assertFailureContains(t, refused, "--yes")
 
 	approved := runCLI(t, env, nil, append(args, "--yes")...)
@@ -196,6 +199,77 @@ func TestStagedCostGuard(t *testing.T) {
 	}
 	if doc := readAndValidate(t, output); !doc.Meta.Staged {
 		t.Fatal("approved run was not staged")
+	}
+	log, err := os.ReadFile(promptLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := strings.Count(string(log), "----- MOCK PROMPT -----"); calls != 10 {
+		t.Fatalf("actual calls = %d, guard planned 10", calls)
+	}
+}
+
+func TestStagedMechanicalProvenanceIsNotStubbed(t *testing.T) {
+	patch := filepath.Join(t.TempDir(), "mechanical.patch")
+	data := `diff --git a/image.png b/image.png
+index 1111111..2222222 100644
+Binary files a/image.png and b/image.png differ
+diff --git a/src/app.go b/src/app.go
+index 1111111..2222222 100644
+--- a/src/app.go
++++ b/src/app.go
+@@ -1 +1 @@
+-package old
++package current
+`
+	if err := os.WriteFile(patch, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	promptLog := filepath.Join(t.TempDir(), "calls.log")
+	env = setEnv(env, "BGR_MOCK_PROMPT_LOG", promptLog)
+	output := filepath.Join(t.TempDir(), "mechanical.html")
+	result := runCLI(t, env, nil,
+		"--diff", patch, "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	if !slices.Equal(doc.Analysis.MechanicalFiles, []int{0}) ||
+		slices.Contains(doc.Analysis.StubbedFiles, 0) {
+		t.Fatalf("provenance = mechanical %#v stubbed %#v",
+			doc.Analysis.MechanicalFiles, doc.Analysis.StubbedFiles)
+	}
+	if !strings.Contains(html, "Generated / auto-summarized") ||
+		strings.Count(html, "No model summary - grouped from path only.") != 0 {
+		t.Fatal("mechanical file did not render with neutral provenance")
+	}
+	includedOutput := filepath.Join(t.TempDir(), "included.json")
+	included := runCLI(t, env, nil,
+		"--diff", patch, "--provider", "mock", "--include-mechanical",
+		"--format", "json", "--out", includedOutput)
+	if included.err != nil {
+		t.Fatalf("include-mechanical command failed: %v\n%s", included.err, included.stderr)
+	}
+	if doc := readAndValidate(t, includedOutput); len(doc.Analysis.MechanicalFiles) != 0 {
+		t.Fatalf("include-mechanical did not override triage: %#v", doc.Analysis.MechanicalFiles)
+	}
+	configPath := filepath.Join(envConfigHome(env), "better-git-review", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("include_mechanical = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configOutput := filepath.Join(t.TempDir(), "config-included.json")
+	configured := runCLI(t, env, nil,
+		"--diff", patch, "--provider", "mock", "--no-cache",
+		"--format", "json", "--out", configOutput)
+	if configured.err != nil {
+		t.Fatalf("include_mechanical config command failed: %v\n%s", configured.err, configured.stderr)
+	}
+	if doc := readAndValidate(t, configOutput); len(doc.Analysis.MechanicalFiles) != 0 {
+		t.Fatalf("include_mechanical config did not override triage: %#v", doc.Analysis.MechanicalFiles)
 	}
 }
 
@@ -226,7 +300,7 @@ func TestDelimiterInjectionIsNeutralized(t *testing.T) {
 	if begin == "" || end == "" || strings.Count(prompt, begin) != 2 || strings.Count(prompt, end) != 2 {
 		t.Fatalf("nonce delimiter framing is invalid:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "[neutralized untrusted delimiter]") {
+	if !strings.Contains(prompt, "[neutralized]") {
 		t.Fatal("prompt did not contain the neutralized fixture marker")
 	}
 }
@@ -377,7 +451,7 @@ func TestCacheDoesNotCrossAnalysisStrategies(t *testing.T) {
 	if third.err != nil {
 		t.Fatalf("second single-pass command failed: %v\n%s", third.err, third.stderr)
 	}
-	if doc := readAndValidate(t, output); doc.Meta.Staged || doc.Meta.Cached {
+	if doc := readAndValidate(t, output); doc.Meta.Staged || !doc.Meta.Cached {
 		t.Fatalf("staged cache crossed into single-pass run: %#v", doc.Meta)
 	}
 }
@@ -925,12 +999,22 @@ func validateDocument(t *testing.T, result document.Document) {
 	if result.Analysis.StubbedFiles == nil {
 		t.Fatal("stubbedFiles must be present even when empty")
 	}
+	if result.Analysis.MechanicalFiles == nil {
+		t.Fatal("mechanicalFiles must be present even when empty")
+	}
 	stubbed := map[int]bool{}
 	for _, fileIndex := range result.Analysis.StubbedFiles {
 		if fileIndex < 0 || fileIndex >= len(result.Files) || stubbed[fileIndex] {
 			t.Fatalf("invalid stubbed file index %d", fileIndex)
 		}
 		stubbed[fileIndex] = true
+	}
+	mechanical := map[int]bool{}
+	for _, fileIndex := range result.Analysis.MechanicalFiles {
+		if fileIndex < 0 || fileIndex >= len(result.Files) || mechanical[fileIndex] || stubbed[fileIndex] {
+			t.Fatalf("invalid mechanical file index %d", fileIndex)
+		}
+		mechanical[fileIndex] = true
 	}
 	seen := make([]int, len(result.Files))
 	for cohortIndex, cohort := range result.Analysis.Cohorts {
@@ -1031,6 +1115,26 @@ func stagedFixturePath(t *testing.T) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("testdata", "staged.patch"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func manyFilesFixturePath(t *testing.T, count int) string {
+	t.Helper()
+	var patch strings.Builder
+	for index := 0; index < count; index++ {
+		fmt.Fprintf(&patch, `diff --git a/src/file-%03d.go b/src/file-%03d.go
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/file-%03d.go
+@@ -0,0 +1 @@
++package generated
+`, index, index, index)
+	}
+	path := filepath.Join(t.TempDir(), "many-files.patch")
+	if err := os.WriteFile(path, []byte(patch.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path

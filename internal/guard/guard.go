@@ -11,20 +11,14 @@ const CallThreshold = 5
 
 type Plan struct {
 	Calls     int
-	MaxCalls  int
 	Provider  string
 	Model     string
 	Reasoning string
 }
 
-func AnalysisPlan(fileCount int, staged bool, provider, model, reasoning string) Plan {
-	calls := 1
-	if staged {
-		calls = fileCount + 1
-	}
+func AnalysisPlan(calls int, provider, model, reasoning string) Plan {
 	return Plan{
 		Calls:     calls,
-		MaxCalls:  calls * 2,
 		Provider:  provider,
 		Model:     model,
 		Reasoning: reasoning,
@@ -35,15 +29,12 @@ func Confirm(plan Plan, yes bool, input io.Reader, output io.Writer, inputIsTTY 
 	if plan.Calls <= CallThreshold {
 		return nil
 	}
-	if plan.MaxCalls == 0 {
-		plan.MaxCalls = plan.Calls * 2
-	}
 	model := plan.Model
 	if plan.Reasoning != "" {
 		model += " (reasoning " + plan.Reasoning + ")"
 	}
-	fmt.Fprintf(output, "This needs %d model calls on %s / %s - up to %d if retries kick in.\n",
-		plan.Calls, plan.Provider, model, plan.MaxCalls)
+	fmt.Fprintf(output, "The fixed plan has exactly %d model calls on %s / %s; a failed stage may add its one allowed retry.\n",
+		plan.Calls, plan.Provider, model)
 	if yes {
 		return nil
 	}

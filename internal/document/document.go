@@ -1,7 +1,7 @@
 package document
 
 const (
-	SchemaVersion = 4
+	SchemaVersion = 5
 )
 
 var Version = "dev"
@@ -26,14 +26,16 @@ type Source struct {
 }
 
 type File struct {
-	Path      string `json:"path"`
-	OldPath   string `json:"oldPath"`
-	NewPath   string `json:"newPath"`
-	Status    string `json:"status"`
-	Binary    bool   `json:"binary"`
-	Additions int    `json:"additions"`
-	Deletions int    `json:"deletions"`
-	Hunks     []Hunk `json:"hunks"`
+	Path        string `json:"path"`
+	OldPath     string `json:"oldPath"`
+	NewPath     string `json:"newPath"`
+	Status      string `json:"status"`
+	Binary      bool   `json:"binary"`
+	Similarity  int    `json:"similarity,omitempty"`
+	ModeChanged bool   `json:"modeChanged,omitempty"`
+	Additions   int    `json:"additions"`
+	Deletions   int    `json:"deletions"`
+	Hunks       []Hunk `json:"hunks"`
 }
 
 type Hunk struct {
@@ -55,10 +57,11 @@ type HunkLine struct {
 }
 
 type Analysis struct {
-	Title        string   `json:"title"`
-	Overview     string   `json:"overview"`
-	Cohorts      []Cohort `json:"cohorts"`
-	StubbedFiles []int    `json:"stubbedFiles"`
+	Title           string   `json:"title"`
+	Overview        string   `json:"overview"`
+	Cohorts         []Cohort `json:"cohorts"`
+	StubbedFiles    []int    `json:"stubbedFiles"`
+	MechanicalFiles []int    `json:"mechanicalFiles"`
 }
 
 type Cohort struct {

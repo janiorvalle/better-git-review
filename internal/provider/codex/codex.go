@@ -31,6 +31,15 @@ type CLI struct {
 
 func (p *CLI) Name() string { return "codex-cli" }
 
+func (p *CLI) AnalysisBudget(context.Context) int {
+	switch p.Model {
+	case "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol":
+		return 400_000
+	default:
+		return provider.DefaultAnalysisBudget
+	}
+}
+
 func (p *CLI) Models(context.Context) ([]provider.ModelOption, error) {
 	return []provider.ModelOption{
 		{ID: "gpt-5.6-luna", Label: "Luna", Note: "recommended", Default: true},
