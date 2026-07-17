@@ -25,10 +25,18 @@ The result is one portable HTML file that opens directly in a browser.
 
 ## Install
 
+On macOS or Linux, the checksum-verifying installer writes both binary names
+to `~/.local/bin` without sudo:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/janiorvalle/better-git-review/main/install.sh | sh
+```
+
 Download the archive for your platform from
 [GitHub Releases](https://github.com/janiorvalle/better-git-review/releases),
 extract it, and place `bgr` on your `PATH`. Archives also include the
-`better-git-review` long-name alias.
+`better-git-review` long-name alias. Windows users should use the release zip;
+`install.sh` serves macOS and Linux only.
 
 You can also build the latest source with Go 1.24 or newer:
 
@@ -56,11 +64,22 @@ Review only uncommitted changes, even when the branch also has commits:
 bgr --dirty
 ```
 
+Compare arbitrary refs, review one commit, or choose interactively:
+
+```sh
+bgr --base main --head feature
+bgr --commit HEAD
+bgr -i
+```
+
 Review a GitHub pull request using the authenticated `gh` CLI:
 
 ```sh
 bgr 123
 ```
+
+GitHub is optional. PR-by-number is the only mode that needs `gh`; git refs,
+commits, dirty changes, patch files, and stdin remain forge-agnostic.
 
 Review a patch file or standard input:
 
@@ -69,9 +88,11 @@ bgr --diff change.patch
 git diff main...HEAD | bgr --diff -
 ```
 
-HTML is the default output. Use `--open` to launch it after generation,
+HTML is the default output and opens automatically in an interactive terminal.
+Use `--no-open` to suppress that, `--open` to force opening from a non-TTY,
 `--out review.html` to choose the path, or `--format json` for the underlying
-schema-versioned walkthrough document.
+schema-versioned walkthrough document. Run `bgr configure` to save provider,
+model, reasoning, auto-open, and optional agent-skill choices.
 
 ## Providers
 
@@ -96,6 +117,9 @@ Install and authenticate the `codex` command:
 bgr --provider codex-cli --base main
 ```
 
+The default is `gpt-5.6-luna` with `low` reasoning. Override either dimension
+with `--model` and `--reasoning`.
+
 The provider uses an isolated read-only workspace and disables host, network,
 browser, connector, plugin, image, and shell tools. The diff is supplied only
 through the prompt.
@@ -107,12 +131,12 @@ Set an API key and choose a model:
 ```sh
 export OPENROUTER_API_KEY=...
 bgr --provider openrouter \
-  --model anthropic/claude-sonnet-4.5 \
+  --model z-ai/glm-5.2 \
   --base main
 ```
 
 OpenRouter uses structured JSON output and defaults to
-`https://openrouter.ai/api/v1`.
+`z-ai/glm-5.2` at `https://openrouter.ai/api/v1`.
 
 ## Configuration
 
@@ -131,9 +155,10 @@ user values, and CLI flags override both.
 
 ```toml
 provider = "openrouter"
+auto_open = true
 
 [providers.openrouter]
-model = "anthropic/claude-sonnet-4.5"
+model = "z-ai/glm-5.2"
 api_key_env = "OPENROUTER_API_KEY"
 base_url = "https://openrouter.ai/api/v1"
 
@@ -141,7 +166,8 @@ base_url = "https://openrouter.ai/api/v1"
 model = "sonnet"
 
 [providers.codex-cli]
-model = "default"
+model = "gpt-5.6-luna"
+reasoning = "low"
 ```
 
 Never place an API key itself in configuration. `api_key_env` names the
@@ -155,8 +181,8 @@ non-interactive environments.
 ## Caching, Cost, And Large Diffs
 
 Analysis is cached under the XDG state directory using the diff content,
-provider, model, and document schema version. `--no-cache` forces fresh
-analysis.
+provider, model, reasoning level, and document schema version. `--no-cache`
+forces fresh analysis.
 
 Small diffs use one analysis call. Diffs over the prompt budget use staged
 analysis: files are summarized concurrently, then those summaries are
