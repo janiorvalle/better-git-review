@@ -59,29 +59,46 @@ func BuildDiagram(steps []StepView) template.HTML {
 			maxDepth = value
 		}
 	}
-	maxRows := 0
-	for _, members := range columns {
-		if len(members) > maxRows {
-			maxRows = len(members)
-		}
-	}
 
 	xAt := func(column int) int { return diagramPadding + column*(diagramNodeWidth+diagramGapX) }
 	yAt := func(row int) int { return diagramPadding + row*(diagramNodeHeight+diagramGapY) }
-	width := xAt(maxDepth) + diagramNodeWidth + diagramPadding
-	height := yAt(maxRows-1) + diagramNodeHeight + diagramPadding
-
 	positions := make([][2]int, count)
-	for column, members := range columns {
-		for row, index := range members {
-			positions[index] = [2]int{xAt(column), yAt(row)}
+	var width, height int
+	if maxDepth == 0 {
+		// No dependencies: a single "column" would render as one tall stack.
+		// Wrap into a reading-order grid instead (at most 3 per row); the gap
+		// shrinks because there are no edges to route between columns.
+		perRow := min(3, count)
+		gapX := diagramGapY
+		gridX := func(column int) int { return diagramPadding + column*(diagramNodeWidth+gapX) }
+		for index := range cohorts {
+			positions[index] = [2]int{gridX(index % perRow), yAt(index / perRow)}
 		}
+		width = gridX(perRow-1) + diagramNodeWidth + diagramPadding
+		height = yAt((count-1)/perRow) + diagramNodeHeight + diagramPadding
+	} else {
+		maxRows := 0
+		for _, members := range columns {
+			if len(members) > maxRows {
+				maxRows = len(members)
+			}
+		}
+		for column, members := range columns {
+			for row, index := range members {
+				positions[index] = [2]int{xAt(column), yAt(row)}
+			}
+		}
+		width = xAt(maxDepth) + diagramNodeWidth + diagramPadding
+		height = yAt(maxRows-1) + diagramNodeHeight + diagramPadding
 	}
 
 	var svg strings.Builder
+	// width/height give the SVG its intrinsic CSS-pixel size (1 unit = 1px):
+	// with only a viewBox it would stretch to the container and a small
+	// diagram would blow up to poster scale.
 	fmt.Fprintf(&svg,
-		`<svg class="cohort-diagram" role="img" aria-label="Cohort dependency flow" viewBox="0 0 %d %d">`,
-		width, height)
+		`<svg class="cohort-diagram" role="img" aria-label="Cohort dependency flow" width="%d" height="%d" viewBox="0 0 %d %d">`,
+		width, height, width, height)
 	svg.WriteString(`<defs><marker id="dg-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path class="dg-arrow-head" d="M0,0 L8,4 L0,8 z"/></marker></defs>`)
 
 	for index := range cohorts {
