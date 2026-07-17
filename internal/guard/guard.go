@@ -42,13 +42,13 @@ func Confirm(plan Plan, yes bool, input io.Reader, output io.Writer, inputIsTTY 
 	if plan.Reasoning != "" {
 		model += " (reasoning " + plan.Reasoning + ")"
 	}
-	fmt.Fprintf(output, "Analysis plan: %d calls using %q/%q (up to %d with validation retries)\n",
+	fmt.Fprintf(output, "This needs %d model calls on %s / %s - up to %d if retries kick in.\n",
 		plan.Calls, plan.Provider, model, plan.MaxCalls)
 	if yes {
 		return nil
 	}
 	if !inputIsTTY {
-		return fmt.Errorf("analysis plan exceeds %d calls; rerun with --yes to approve it", CallThreshold)
+		return fmt.Errorf("this run needs more than %d model calls - add --yes to approve the spend", CallThreshold)
 	}
 	fmt.Fprint(output, "Continue? [y/N] ")
 	reader, ok := input.(*bufio.Reader)
@@ -61,7 +61,7 @@ func Confirm(plan Plan, yes bool, input io.Reader, output io.Writer, inputIsTTY 
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	if answer != "y" && answer != "yes" {
-		return fmt.Errorf("analysis cancelled")
+		return fmt.Errorf("cancelled - no model calls were made")
 	}
 	return nil
 }

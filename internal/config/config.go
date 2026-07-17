@@ -239,10 +239,10 @@ func ensureRepoTrust(opts LoadOptions, repoCfg Config) error {
 		return nil
 	}
 
-	fmt.Fprintf(opts.Output, "Repository config at %q requests provider settings:\n%s\n", repoPath, DescribeProviderSettings(repoCfg))
+	fmt.Fprintf(opts.Output, "This repository's config (%s) wants to set your provider:\n%s\n", repoPath, DescribeProviderSettings(repoCfg))
 	if !opts.AcceptRepoTrust && !opts.Yes {
 		if !opts.InputIsTTY {
-			return fmt.Errorf("repo config is not trusted; rerun with --trust-repo-config or --yes to accept it")
+			return fmt.Errorf("these repo settings aren't trusted yet - rerun with --trust-repo-config (or --yes) once you've looked them over")
 		}
 		fmt.Fprint(opts.Output, "Trust these settings for this repository? [y/N] ")
 		reader, ok := opts.Input.(*bufio.Reader)
@@ -255,7 +255,7 @@ func ensureRepoTrust(opts LoadOptions, repoCfg Config) error {
 		}
 		answer = strings.ToLower(strings.TrimSpace(answer))
 		if answer != "y" && answer != "yes" {
-			return fmt.Errorf("repo config was not trusted")
+			return fmt.Errorf("okay - leaving the repo config untrusted")
 		}
 	}
 

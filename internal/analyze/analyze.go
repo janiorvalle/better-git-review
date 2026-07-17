@@ -94,7 +94,7 @@ func runStaged(
 	delimiters Delimiters,
 	logf func(string, ...any),
 ) (document.Analysis, error) {
-	logf("staged analysis: summarizing %d file(s) with up to %d concurrent calls", len(opts.Files), StageConcurrency)
+	logf("summarizing %d files, up to %d at a time", len(opts.Files), StageConcurrency)
 	summaries := make([]FileSummary, len(opts.Files))
 	summaryErrors := make([]error, len(opts.Files))
 	jobs := make(chan int)
@@ -149,7 +149,7 @@ func runStaged(
 		stubbed = append(stubbed, index)
 		logf("file %d summary failed; using path-derived stub: %v", index, summaryErr)
 	}
-	logf("staged analysis: clustering %d file summaries", len(summaries))
+	logf("clustering %d summaries into review steps", len(summaries))
 	prompt := BuildClusterPrompt(opts.Source, opts.Files, summaries, delimiters)
 	analysis, raw, validationErrors, err := runGauntlet(
 		ctx,
@@ -190,7 +190,7 @@ func runGauntlet[T any](
 		if attempt > 0 {
 			attemptPrompt += "\n\nYour previous response failed validation. Return corrected JSON only. Exact errors:\n- " +
 				strings.Join(lastErrors, "\n- ")
-			logf("provider output for %s failed validation; retrying once ...", unit)
+			logf("the model's %s answer didn't validate - asking for a corrected one ...", unit)
 		}
 
 		var value T

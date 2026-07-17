@@ -48,7 +48,7 @@ func (s Source) Detect(opts source.Options) (bool, string) {
 
 func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result, error) {
 	runner := s.commandRunner()
-	opts.Logf("fetching PR #%s via gh ...", opts.PR)
+	opts.Logf("fetching PR #%s from GitHub ...", opts.PR)
 	metaRaw, err := runner.Run(ctx, opts.RepoDir, "gh", "pr", "view", opts.PR, "--json",
 		"number,title,body,baseRefName,headRefName,baseRefOid,headRefOid,changedFiles,url")
 	if err != nil {
@@ -83,7 +83,7 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		}
 	}
 	if fallbackOn != "" {
-		opts.Logf("%s; falling back to local git objects ...", fallbackOn)
+		opts.Logf("%s - using local git objects instead ...", fallbackOn)
 		diffBytes, err = s.localDiff(ctx, opts.RepoDir, meta.URL, meta.BaseRefOID, meta.HeadRefOID)
 		if err != nil {
 			return source.Result{}, fmt.Errorf("%s; local-git fallback failed: %w. Run PR mode from a clone with a remote matching the PR repository", fallbackOn, err)

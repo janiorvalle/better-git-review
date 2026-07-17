@@ -186,7 +186,7 @@ func TestStagedCostGuard(t *testing.T) {
 		"--format", "json", "--out", output,
 	}
 	refused := runCLI(t, env, nil, args...)
-	assertFailureContains(t, refused, "7 calls")
+	assertFailureContains(t, refused, "7 model calls")
 	assertFailureContains(t, refused, "up to 14")
 	assertFailureContains(t, refused, "--yes")
 
@@ -484,7 +484,7 @@ func TestGitSources(t *testing.T) {
 		if len(doc.Files) != 1 || doc.Files[0].Path != "base.txt" {
 			t.Fatalf("working-tree change was not collected: %#v", doc.Files)
 		}
-		if !strings.Contains(result.stderr, "falling back to uncommitted changes") {
+		if !strings.Contains(result.stderr, "reviewing uncommitted changes instead") {
 			t.Fatalf("fallback was not logged: %s", result.stderr)
 		}
 	})
@@ -586,7 +586,7 @@ func TestGitHub503FallsBackToLocalRefs(t *testing.T) {
 		t.Fatalf("fallback failed: %v\n%s", result.err, result.stderr)
 	}
 	doc := readAndValidate(t, output)
-	if len(doc.Files) != 1 || doc.Files[0].Path != "fallback.go" || !strings.Contains(result.stderr, "falling back to local git objects") {
+	if len(doc.Files) != 1 || doc.Files[0].Path != "fallback.go" || !strings.Contains(result.stderr, "using local git objects instead") {
 		t.Fatalf("unexpected fallback: %#v\n%s", doc.Files, result.stderr)
 	}
 }

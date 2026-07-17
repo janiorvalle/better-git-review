@@ -24,6 +24,39 @@ type Options struct {
 	Output     io.Writer
 	Home       string
 	FirstRun   bool
+	// Styled enables the same restrained ANSI palette the run output
+	// uses. Callers gate it on TTY + NO_COLOR; piped output stays plain.
+	Styled bool
+}
+
+type style struct{ enabled bool }
+
+func (s style) bold(text string) string {
+	if !s.enabled {
+		return text
+	}
+	return "\x1b[1m" + text + "\x1b[0m"
+}
+
+func (s style) dim(text string) string {
+	if !s.enabled {
+		return text
+	}
+	return "\x1b[2m" + text + "\x1b[0m"
+}
+
+func (s style) ok(text string) string {
+	if !s.enabled {
+		return text
+	}
+	return "\x1b[32m" + text + "\x1b[0m"
+}
+
+func (s style) miss(text string) string {
+	if !s.enabled {
+		return text
+	}
+	return "\x1b[31m" + text + "\x1b[0m"
 }
 
 type Result struct {
@@ -48,15 +81,16 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		fmt.Fprintln(opts.Output, "bgr configure")
 	}
 
+	styles := style{enabled: opts.Styled}
 	probes := opts.Registry.ProbeAll()
 	for _, probe := range probes {
-		mark := "\u2717"
+		mark := styles.miss("\u2717")
 		if probe.Available {
-			mark = "\u2713"
+			mark = styles.ok("\u2713")
 		}
-		fmt.Fprintf(opts.Output, "  %s %s - %s\n", mark, probe.Name, probe.Detail)
+		fmt.Fprintf(opts.Output, "  %s %s %s\n", mark, probe.Name, styles.dim("- "+probe.Detail))
 	}
-	providerName, err := chooseProvider(reader, opts.Output, probes, opts.Current.Provider)
+	providerName, err := chooseProvider(reader, opts.Output, probes, opts.Current.Provider, styles)
 	if err != nil {
 		return Result{}, err
 	}
@@ -72,14 +106,14 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		if modelErr != nil {
 			return Result{}, fmt.Errorf("load %s model catalog: %w", providerName, modelErr)
 		}
-		model, err = chooseModel(reader, opts.Output, models, firstNonEmpty(providerCfg.Model, selection.Model))
+		model, err = chooseModel(reader, opts.Output, models, firstNonEmpty(providerCfg.Model, selection.Model), styles)
 		if err != nil {
 			return Result{}, err
 		}
 		if selector, ok := selection.Provider.(provider.CatalogModelSelector); ok {
 			selector.SetCatalogModel(model)
 		}
-		reasoning, err = chooseReasoning(reader, opts.Output, catalog.ReasoningLevels(), providerCfg.Reasoning, selection.Reasoning)
+		reasoning, err = chooseReasoning(reader, opts.Output, catalog.ReasoningLevels(), providerCfg.Reasoning, selection.Reasoning, styles)
 		if err != nil {
 			return Result{}, err
 		}
@@ -98,7 +132,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := installSkill(reader, opts.Output, opts.Home); err != nil {
+	if err := installSkill(reader, opts.Output, opts.Home, styles); err != nil {
 		return Result{}, err
 	}
 	if opts.Current.Providers == nil {
@@ -115,11 +149,11 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := config.WriteUser(opts.ConfigPath, opts.Current); err != nil {
 		return Result{}, fmt.Errorf("write user config: %w", err)
 	}
-	fmt.Fprintf(opts.Output, "\nSaved %s\n", opts.ConfigPath)
+	fmt.Fprintf(opts.Output, "\n%s Saved %s\n", styles.ok("\u2713"), opts.ConfigPath)
 	if providerName == "openrouter" {
 		fmt.Fprintf(opts.Output, "Set %s in your environment; the key is never stored in config.\n", providerCfg.APIKeyEnv)
 	}
-	fmt.Fprintln(opts.Output, "Quick reference: bgr --dirty | bgr --commit <sha> | bgr <PR_NUMBER> | bgr -i")
+	fmt.Fprintln(opts.Output, styles.dim("Quick reference: bgr --dirty | bgr --commit <sha> | bgr <PR_NUMBER> | bgr -i"))
 	if !opts.FirstRun {
 		return Result{Config: opts.Current}, nil
 	}
@@ -130,7 +164,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	return Result{Config: opts.Current, ReviewNow: reviewNow}, nil
 }
 
-func chooseProvider(reader *bufio.Reader, output io.Writer, probes []provider.Probe, current string) (string, error) {
+func chooseProvider(reader *bufio.Reader, output io.Writer, probes []provider.Probe, current string, styles style) (string, error) {
 	if current == "" {
 		for _, probe := range probes {
 			if probe.Available {
@@ -142,7 +176,7 @@ func chooseProvider(reader *bufio.Reader, output io.Writer, probes []provider.Pr
 	if current == "" && len(probes) > 0 {
 		current = probes[0].Name
 	}
-	fmt.Fprintln(output, "\nProvider")
+	fmt.Fprintln(output, "\n"+styles.bold("Provider"))
 	defaultIndex := 1
 	for index, probe := range probes {
 		status := "unavailable"
@@ -154,7 +188,7 @@ func chooseProvider(reader *bufio.Reader, output io.Writer, probes []provider.Pr
 			defaultIndex = index + 1
 		}
 	}
-	answer, err := prompt(reader, output, "Provider number", fmt.Sprintf("%d", defaultIndex))
+	answer, err := prompt(reader, output, "Pick a provider", fmt.Sprintf("%d", defaultIndex))
 	if err != nil {
 		return "", err
 	}
@@ -170,7 +204,7 @@ func chooseProvider(reader *bufio.Reader, output io.Writer, probes []provider.Pr
 	return probes[index].Name, nil
 }
 
-func chooseModel(reader *bufio.Reader, output io.Writer, models []provider.ModelOption, current string) (string, error) {
+func chooseModel(reader *bufio.Reader, output io.Writer, models []provider.ModelOption, current string, styles style) (string, error) {
 	if current == "" {
 		for _, model := range models {
 			if model.Default {
@@ -186,7 +220,7 @@ func chooseModel(reader *bufio.Reader, output io.Writer, models []provider.Model
 		if len(visible) > 8 {
 			visible = visible[:8]
 		}
-		fmt.Fprintln(output, "\nModel")
+		fmt.Fprintln(output, "\n"+styles.bold("Model"))
 		for index, model := range visible {
 			note := ""
 			if model.Note != "" {
@@ -199,7 +233,7 @@ func chooseModel(reader *bufio.Reader, output io.Writer, models []provider.Model
 		if hidden := len(filtered) - len(visible); hidden > 0 {
 			fmt.Fprintf(output, "     ... %d more - type to filter\n", hidden)
 		}
-		answer, err := prompt(reader, output, "Model number or filter", defaultModelChoice(visible, current))
+		answer, err := prompt(reader, output, "Pick a model, or type to filter", defaultModelChoice(visible, current))
 		if err != nil {
 			return "", err
 		}
@@ -213,12 +247,12 @@ func chooseModel(reader *bufio.Reader, output io.Writer, models []provider.Model
 	}
 }
 
-func chooseReasoning(reader *bufio.Reader, output io.Writer, levels []string, current, fallback string) (string, error) {
+func chooseReasoning(reader *bufio.Reader, output io.Writer, levels []string, current, fallback string, styles style) (string, error) {
 	if len(levels) == 0 {
 		return "", nil
 	}
 	current = firstNonEmpty(current, fallback)
-	fmt.Fprintln(output, "\nReasoning")
+	fmt.Fprintln(output, "\n"+styles.bold("Reasoning"))
 	fmt.Fprintln(output, "  1  provider default")
 	defaultChoice := "1"
 	for index, level := range levels {
@@ -227,7 +261,7 @@ func chooseReasoning(reader *bufio.Reader, output io.Writer, levels []string, cu
 			defaultChoice = fmt.Sprintf("%d", index+2)
 		}
 	}
-	answer, err := prompt(reader, output, "Reasoning number", defaultChoice)
+	answer, err := prompt(reader, output, "Pick a reasoning level", defaultChoice)
 	if err != nil {
 		return "", err
 	}
@@ -241,8 +275,8 @@ func chooseReasoning(reader *bufio.Reader, output io.Writer, levels []string, cu
 	return levels[index-1], nil
 }
 
-func installSkill(reader *bufio.Reader, output io.Writer, home string) error {
-	fmt.Fprintln(output, "\nInstall the embedded bgr agent skill?")
+func installSkill(reader *bufio.Reader, output io.Writer, home string, styles style) error {
+	fmt.Fprintln(output, "\n"+styles.bold("Teach your coding agents to use bgr?")+" "+styles.dim("(installs the embedded skill)"))
 	fmt.Fprintln(output, "  1  Skip (default)")
 	fmt.Fprintln(output, "  2  Claude Code")
 	fmt.Fprintln(output, "  3  Codex")
