@@ -336,7 +336,6 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 			Meta: document.Meta{
 				Provider:  input.Selection.Provider.Name(),
 				Model:     input.Selection.Model,
-				Reasoning: input.Selection.Reasoning,
 				Generator: document.Generator(),
 				Cached:    false,
 				Staged:    stageDecision.Staged,

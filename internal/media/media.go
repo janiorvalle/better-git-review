@@ -22,7 +22,10 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/gitexec"
 )
 
-const MaxPreviewBytes = 1536 * 1024
+const (
+	MaxPreviewBytes      = 1536 * 1024
+	MaxTotalPreviewBytes = 12 * 1024 * 1024
+)
 
 type Source struct {
 	RepoDir string
@@ -56,6 +59,7 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 			baseRef = strings.TrimSpace(string(merged))
 		}
 	}
+	remainingPreviewBytes := int64(MaxTotalPreviewBytes)
 	for index, file := range files {
 		if !file.Binary {
 			continue
@@ -69,18 +73,19 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 			result[index] = Preview{Image: imageFile, Label: label}
 			continue
 		}
-		oldAsset := loadGitAsset(ctx, source.RepoDir, baseRef, file.OldPath, runner, imageFile)
+		var oldAsset *Asset
+		if file.Status != "added" {
+			oldAsset = loadGitAsset(ctx, source.RepoDir, baseRef, file.OldPath, runner, imageFile, remainingPreviewBytes)
+			remainingPreviewBytes -= embeddedBytes(oldAsset)
+		}
 		var newAsset *Asset
-		if source.Dirty {
-			newAsset = loadWorktreeAsset(source.RepoDir, file.NewPath, imageFile)
-		} else {
-			newAsset = loadGitAsset(ctx, source.RepoDir, source.HeadRef, file.NewPath, runner, imageFile)
-		}
-		if file.Status == "added" {
-			oldAsset = nil
-		}
-		if file.Status == "deleted" {
-			newAsset = nil
+		if file.Status != "deleted" {
+			if source.Dirty {
+				newAsset = loadWorktreeAsset(source.RepoDir, file.NewPath, imageFile, remainingPreviewBytes)
+			} else {
+				newAsset = loadGitAsset(ctx, source.RepoDir, source.HeadRef, file.NewPath, runner, imageFile, remainingPreviewBytes)
+			}
+			remainingPreviewBytes -= embeddedBytes(newAsset)
 		}
 		label := sizeStory(imageFile, oldAsset, newAsset)
 		if imageFile && previewable(oldAsset) && previewable(newAsset) && (oldAsset != nil || newAsset != nil) {
@@ -92,7 +97,7 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 	return result
 }
 
-func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec.Runner, includeContent bool) *Asset {
+func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec.Runner, includeContent bool, contentBudget int64) *Asset {
 	if ref == "" || ref == "WORKTREE" || path == "" || path == "/dev/null" {
 		return nil
 	}
@@ -106,7 +111,7 @@ func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec
 		return nil
 	}
 	asset := &Asset{Size: size, SizeLabel: formatSize(size)}
-	if !includeContent || size > MaxPreviewBytes {
+	if !includeContent || size > MaxPreviewBytes || size > contentBudget {
 		return asset
 	}
 	content, err := runner.Run(ctx, repoDir, "cat-file", "-p", spec)
@@ -117,7 +122,7 @@ func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec
 	return asset
 }
 
-func loadWorktreeAsset(repoDir, path string, includeContent bool) *Asset {
+func loadWorktreeAsset(repoDir, path string, includeContent bool, contentBudget int64) *Asset {
 	fullPath, pathInfo, ok := safeWorktreePath(repoDir, path)
 	if !ok {
 		return nil
@@ -132,7 +137,7 @@ func loadWorktreeAsset(repoDir, path string, includeContent bool) *Asset {
 		return nil
 	}
 	asset := &Asset{Size: info.Size(), SizeLabel: formatSize(info.Size())}
-	if !includeContent || info.Size() > MaxPreviewBytes {
+	if !includeContent || info.Size() > MaxPreviewBytes || info.Size() > contentBudget {
 		return asset
 	}
 	content, err := io.ReadAll(io.LimitReader(file, MaxPreviewBytes+1))
@@ -141,6 +146,13 @@ func loadWorktreeAsset(repoDir, path string, includeContent bool) *Asset {
 	}
 	fillImage(asset, path, content)
 	return asset
+}
+
+func embeddedBytes(asset *Asset) int64 {
+	if asset == nil || asset.DataURI == "" {
+		return 0
+	}
+	return asset.Size
 }
 
 func safeWorktreePath(repoDir, path string) (string, os.FileInfo, bool) {

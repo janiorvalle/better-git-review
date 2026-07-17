@@ -162,11 +162,11 @@ func matchingRemote(ctx context.Context, runner gitexec.Runner, repoDir, prURL s
 	if len(remotes) == 0 {
 		return "", fmt.Errorf("local repository has no git remotes")
 	}
-	target := githubRepositorySlug(prURL)
+	target := repositoryIdentity(prURL)
 	if target != "" {
 		for _, remote := range remotes {
 			remoteURL, remoteErr := runner.Run(ctx, repoDir, "remote", "get-url", remote)
-			if remoteErr == nil && strings.EqualFold(githubRepositorySlug(strings.TrimSpace(string(remoteURL))), target) {
+			if remoteErr == nil && strings.EqualFold(repositoryIdentity(strings.TrimSpace(string(remoteURL))), target) {
 				return remote, nil
 			}
 		}
@@ -177,16 +177,28 @@ func matchingRemote(ctx context.Context, runner gitexec.Runner, repoDir, prURL s
 	return "", fmt.Errorf("no git remote matches PR repository %q", target)
 }
 
-func githubRepositorySlug(raw string) string {
+func repositoryIdentity(raw string) string {
 	raw = strings.TrimSpace(raw)
-	if marker := strings.Index(strings.ToLower(raw), "github.com:"); marker >= 0 {
-		return cleanRepositorySlug(raw[marker+len("github.com:"):])
+	if !strings.Contains(raw, "://") {
+		if marker := strings.Index(raw, ":"); marker > 0 {
+			host := raw[:marker]
+			if at := strings.LastIndex(host, "@"); at >= 0 {
+				host = host[at+1:]
+			}
+			if slug := cleanRepositorySlug(raw[marker+1:]); host != "" && slug != "" {
+				return strings.ToLower(host) + "/" + slug
+			}
+		}
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil || !strings.EqualFold(parsed.Hostname(), "github.com") {
+	if err != nil || parsed.Hostname() == "" {
 		return ""
 	}
-	return cleanRepositorySlug(parsed.Path)
+	slug := cleanRepositorySlug(parsed.Path)
+	if slug == "" {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname()) + "/" + slug
 }
 
 func cleanRepositorySlug(path string) string {

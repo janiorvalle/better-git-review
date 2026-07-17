@@ -42,7 +42,14 @@ fi
 base_url=${base_url%/}
 
 tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t bgr-install)
-trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+stage_bgr=""
+stage_long=""
+cleanup() {
+  rm -rf "$tmp_dir"
+  [ -z "$stage_bgr" ] || rm -f "$stage_bgr"
+  [ -z "$stage_long" ] || rm -f "$stage_long"
+}
+trap cleanup EXIT HUP INT TERM
 archive="$tmp_dir/$archive_name"
 checksums="$tmp_dir/checksums.txt"
 
@@ -64,11 +71,22 @@ fi
 tar -xzf "$archive" -C "$tmp_dir"
 [ -x "$tmp_dir/bgr" ] || fail "archive did not contain bgr"
 [ -x "$tmp_dir/better-git-review" ] || fail "archive did not contain better-git-review"
+bgr_version=$("$tmp_dir/bgr" --version) || fail "release bgr failed its version smoke test"
+long_version=$("$tmp_dir/better-git-review" --version) || fail "release better-git-review failed its version smoke test"
+[ "$bgr_version" = "$long_version" ] || fail "release binaries reported different versions"
+
 mkdir -p "$install_dir"
-install -m 0755 "$tmp_dir/bgr" "$install_dir/bgr"
-install -m 0755 "$tmp_dir/better-git-review" "$install_dir/better-git-review"
+stage_bgr="$install_dir/.bgr.new.$$"
+stage_long="$install_dir/.better-git-review.new.$$"
+install -m 0755 "$tmp_dir/bgr" "$stage_bgr"
+install -m 0755 "$tmp_dir/better-git-review" "$stage_long"
+mv -f "$stage_bgr" "$install_dir/bgr"
+stage_bgr=""
+mv -f "$stage_long" "$install_dir/better-git-review"
+stage_long=""
 
 "$install_dir/bgr" --version >/dev/null || fail "installed bgr failed its version smoke test"
+"$install_dir/better-git-review" --version >/dev/null || fail "installed better-git-review failed its version smoke test"
 printf 'Installed bgr and better-git-review to %s\n' "$install_dir"
 case ":$PATH:" in
   *":$install_dir:"*) ;;

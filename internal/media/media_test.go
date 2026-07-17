@@ -64,6 +64,25 @@ func TestPreviewCapAvoidsBlobRead(t *testing.T) {
 	}
 }
 
+func TestPreviewAggregateBudgetBoundsBlobReads(t *testing.T) {
+	runner := &assetRunner{content: make([]byte, 1<<20)}
+	files := make([]document.File, 7)
+	for index := range files {
+		path := fmt.Sprintf("image-%d.png", index)
+		files[index] = document.File{Path: path, OldPath: path, NewPath: path, Status: "modified", Binary: true}
+	}
+	Enrich(context.Background(), files, Source{RepoDir: "/repo", BaseRef: "base", HeadRef: "head"}, runner)
+	contentReads := 0
+	for _, call := range runner.calls {
+		if strings.Contains(call, "cat-file -p") {
+			contentReads++
+		}
+	}
+	if contentReads != MaxTotalPreviewBytes/(1<<20) {
+		t.Fatalf("content reads = %d, calls = %#v", contentReads, runner.calls)
+	}
+}
+
 func TestPatchImageGetsHonestLabel(t *testing.T) {
 	previews := Enrich(context.Background(), []document.File{{Path: "image.svg", Binary: true}}, Source{}, nil)
 	if got := previews[0].Label; got != "Binary image \u00b7 content not available from patch input." {

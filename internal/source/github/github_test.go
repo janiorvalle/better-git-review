@@ -65,6 +65,21 @@ func TestMatchingRemoteUsesPRRepositoryInsteadOfOrigin(t *testing.T) {
 	}
 }
 
+func TestMatchingRemoteSupportsGitHubEnterprise(t *testing.T) {
+	runner := remoteRunner{outputs: map[string]string{
+		"remote":                  "origin\nupstream\n",
+		"remote get-url origin":   "ssh://git@ghe.example.com/team/fork.git\n",
+		"remote get-url upstream": "git@ghe.example.com:team/project.git\n",
+	}}
+	remote, err := matchingRemote(context.Background(), runner, "/repo", "https://ghe.example.com/team/project/pull/42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remote != "upstream" {
+		t.Fatalf("remote = %q", remote)
+	}
+}
+
 type fakeResponse struct {
 	data []byte
 	err  error

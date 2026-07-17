@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -134,9 +135,10 @@ func TestShouldOpenDecisionMatrix(t *testing.T) {
 }
 
 func TestFirstRunOnboardingWritesConfig(t *testing.T) {
-	configHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
-	t.Setenv("HOME", t.TempDir())
+	configHome := useTestConfigHome(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	stdinTTY := true
 	stderrTTY := false
 	input := strings.NewReader("2\n\n\n\n\nn\n")
@@ -175,10 +177,8 @@ func TestEmptyGitDiffEntersPickerWhenInputIsTTY(t *testing.T) {
 	runAppGit(t, repo, "add", "file.txt")
 	runAppGit(t, repo, "commit", "-m", "second")
 
-	configHome := t.TempDir()
-	stateHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
-	t.Setenv("XDG_STATE_HOME", stateHome)
+	configHome := useTestConfigHome(t)
+	useTestStateHome(t)
 	if err := config.WriteUser(filepath.Join(configHome, "better-git-review", "config.toml"), config.Config{
 		Provider: "mock", Providers: map[string]config.ProviderConfig{},
 	}); err != nil {
@@ -200,6 +200,27 @@ func TestEmptyGitDiffEntersPickerWhenInputIsTTY(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "Review what?") || !strings.Contains(stderr.String(), "running: bgr --commit") {
 		t.Fatalf("picker transcript missing:\n%s", stderr.String())
+	}
+}
+
+func useTestConfigHome(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", dir)
+	} else {
+		t.Setenv("XDG_CONFIG_HOME", dir)
+	}
+	return dir
+}
+
+func useTestStateHome(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", dir)
+	} else {
+		t.Setenv("XDG_STATE_HOME", dir)
 	}
 }
 

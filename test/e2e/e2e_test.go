@@ -606,7 +606,7 @@ func TestConfigureRoundTripAndSkillInstall(t *testing.T) {
 	if first.err != nil {
 		t.Fatalf("configure failed: %v\n%s", first.err, first.stderr)
 	}
-	configPath := filepath.Join(envValue(env, "XDG_CONFIG_HOME"), "better-git-review", "config.toml")
+	configPath := filepath.Join(envConfigHome(env), "better-git-review", "config.toml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -667,12 +667,12 @@ func TestFreshNonTTYRunDoesNotOnboard(t *testing.T) {
 	if strings.Contains(result.stderr, "\x1b") {
 		t.Fatalf("non-TTY output contains ANSI bytes: %q", result.stderr)
 	}
-	if _, err := os.Stat(filepath.Join(envValue(env, "XDG_CONFIG_HOME"), "better-git-review", "config.toml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(envConfigHome(env), "better-git-review", "config.toml")); !os.IsNotExist(err) {
 		t.Fatalf("non-TTY run wrote config: %v", err)
 	}
 }
 
-func TestReasoningFlagReachesProviderAndMetadata(t *testing.T) {
+func TestReasoningFlagReachesProviderAndAnnouncement(t *testing.T) {
 	env := isolatedEnvironment(t)
 	reasoningLog := filepath.Join(t.TempDir(), "reasoning.txt")
 	env = setEnv(env, "BGR_MOCK_REASONING_LOG", reasoningLog)
@@ -682,9 +682,9 @@ func TestReasoningFlagReachesProviderAndMetadata(t *testing.T) {
 	if result.err != nil {
 		t.Fatalf("reasoning run failed: %v\n%s", result.err, result.stderr)
 	}
-	doc := readAndValidate(t, output)
-	if doc.Meta.Reasoning != "high" || !strings.Contains(result.stderr, `reasoning: "high"`) {
-		t.Fatalf("reasoning metadata/announcement missing: %#v\n%s", doc.Meta, result.stderr)
+	readAndValidate(t, output)
+	if !strings.Contains(result.stderr, `reasoning: "high"`) {
+		t.Fatalf("reasoning announcement missing:\n%s", result.stderr)
 	}
 	data, err := os.ReadFile(reasoningLog)
 	if err != nil || strings.TrimSpace(string(data)) != "high" {
@@ -1089,6 +1089,13 @@ func envValue(env []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func envConfigHome(env []string) string {
+	if runtime.GOOS == "windows" {
+		return envValue(env, "APPDATA")
+	}
+	return envValue(env, "XDG_CONFIG_HOME")
 }
 
 func initializeRepo(t *testing.T) string {
