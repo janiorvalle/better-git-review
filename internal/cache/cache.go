@@ -19,7 +19,7 @@ type Cache struct {
 	Validate Validator
 }
 
-func Key(diff []byte, providerName, model string, schemaVersion int) string {
+func Key(diff []byte, providerName, model, reasoning string, schemaVersion int) string {
 	hash := sha256.New()
 	writePart := func(part []byte) {
 		fmt.Fprintf(hash, "%d:", len(part))
@@ -28,6 +28,7 @@ func Key(diff []byte, providerName, model string, schemaVersion int) string {
 	writePart(diff)
 	writePart([]byte(providerName))
 	writePart([]byte(model))
+	writePart([]byte(reasoning))
 	writePart([]byte(fmt.Sprintf("%d", schemaVersion)))
 	return hex.EncodeToString(hash.Sum(nil))
 }

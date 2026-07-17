@@ -11,12 +11,13 @@ import (
 )
 
 func TestKeyChangesForEveryInput(t *testing.T) {
-	base := Key([]byte("diff"), "mock", "one", 1)
+	base := Key([]byte("diff"), "mock", "one", "low", 1)
 	values := []string{
-		Key([]byte("different"), "mock", "one", 1),
-		Key([]byte("diff"), "claude-cli", "one", 1),
-		Key([]byte("diff"), "mock", "two", 1),
-		Key([]byte("diff"), "mock", "one", 2),
+		Key([]byte("different"), "mock", "one", "low", 1),
+		Key([]byte("diff"), "claude-cli", "one", "low", 1),
+		Key([]byte("diff"), "mock", "two", "low", 1),
+		Key([]byte("diff"), "mock", "one", "high", 1),
+		Key([]byte("diff"), "mock", "one", "low", 2),
 	}
 	for _, value := range values {
 		if value == base {
@@ -35,7 +36,7 @@ func TestCacheRoundTripAndCorruption(t *testing.T) {
 			return nil
 		},
 	}
-	key := Key([]byte("diff"), "mock", "deterministic", 1)
+	key := Key([]byte("diff"), "mock", "deterministic", "", 1)
 	value := document.Document{
 		SchemaVersion: document.SchemaVersion,
 		Files:         []document.File{{Path: "a.go"}},

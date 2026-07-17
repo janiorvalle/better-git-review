@@ -14,16 +14,21 @@ import (
 type Runner = gitexec.Runner
 
 func Enrich(ctx context.Context, repoDir string, files []document.File, runner Runner) {
-	enrich(ctx, repoDir, files, newLineRange, runner)
+	EnrichRef(ctx, repoDir, "HEAD", files, runner)
+}
+
+func EnrichRef(ctx context.Context, repoDir, ref string, files []document.File, runner Runner) {
+	enrich(ctx, repoDir, ref, files, newLineRange, runner)
 }
 
 func EnrichUncommitted(ctx context.Context, repoDir string, files []document.File, runner Runner) {
-	enrich(ctx, repoDir, files, oldLineRange, runner)
+	enrich(ctx, repoDir, "HEAD", files, oldLineRange, runner)
 }
 
 func enrich(
 	ctx context.Context,
 	repoDir string,
+	ref string,
 	files []document.File,
 	lineRange func(document.Hunk) (int, int, bool),
 	runner Runner,
@@ -45,7 +50,7 @@ func enrich(
 				continue
 			}
 			output, err := runner.Run(ctx, repoDir,
-				gitexec.Harden(gitexec.BlameArgs(fmt.Sprintf("%d,%d", start, end), file.Path)...)...)
+				gitexec.Harden(gitexec.BlameArgs(ref, fmt.Sprintf("%d,%d", start, end), file.Path)...)...)
 			if err != nil {
 				continue
 			}

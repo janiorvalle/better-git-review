@@ -7,7 +7,7 @@ import (
 
 func TestGitArgumentsCarrySharedHardening(t *testing.T) {
 	diff := Harden(DiffArgs("main...HEAD")...)
-	blame := Harden(BlameArgs("3,8", "main.go")...)
+	blame := Harden(BlameArgs("topic", "3,8", "main.go")...)
 	for _, args := range [][]string{diff, blame} {
 		if !slices.Contains(args, "color.ui=false") {
 			t.Fatalf("shared color hardening missing: %#v", args)

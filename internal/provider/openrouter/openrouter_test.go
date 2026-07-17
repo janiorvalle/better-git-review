@@ -12,11 +12,11 @@ import (
 )
 
 func TestAdapterDefaultModel(t *testing.T) {
-	_, model, err := (Adapter{}).New(provider.AdapterOptions{})
+	_, model, _, _, err := (Adapter{}).New(provider.AdapterOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != "anthropic/claude-sonnet-4.5" {
+	if model != "z-ai/glm-5.2" {
 		t.Fatalf("model = %q", model)
 	}
 }
@@ -110,6 +110,67 @@ func TestStructuredRequestRequiresSupportedParameters(t *testing.T) {
 	client := testClient(server)
 	if _, err := client.CompleteStructured(context.Background(), "prompt", json.RawMessage(`{"type":"object"}`)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReasoningIsIncludedInRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		reasoning, ok := body["reasoning"].(map[string]any)
+		if !ok || reasoning["effort"] != "high" {
+			t.Errorf("reasoning body = %#v", body)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"ok"}}]}`))
+	}))
+	defer server.Close()
+	client := testClient(server)
+	client.Reasoning = "high"
+	if _, err := client.Complete(context.Background(), "prompt"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLiveCatalogShapeAndPerModelReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"data":[{
+			"id":"z-ai/glm-5.2","name":"Z.ai: GLM 5.2","context_length":1048576,
+			"pricing":{"prompt":"0.0000009016","completion":"0.0000028336"},
+			"reasoning":{"supported_efforts":["xhigh","high"]}
+		}]}`))
+	}))
+	defer server.Close()
+	client := testClient(server)
+	models, err := client.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "z-ai/glm-5.2" || !strings.Contains(models[0].Note, "$0.90/$2.83") || !strings.Contains(models[0].Note, "1.0M") {
+		t.Fatalf("models = %#v", models)
+	}
+	client.SetCatalogModel("z-ai/glm-5.2")
+	levels := client.ReasoningLevels()
+	if len(levels) != 2 || levels[0] != "xhigh" || levels[1] != "high" {
+		t.Fatalf("levels = %#v", levels)
+	}
+}
+
+func TestCatalogFallsBackWhenRemoteIsUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		http.Error(response, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client := testClient(server)
+	models, err := client.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) == 0 || models[0].ID != "z-ai/glm-5.2" || !models[0].Default {
+		t.Fatalf("fallback models = %#v", models)
 	}
 }
 

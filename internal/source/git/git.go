@@ -34,10 +34,14 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 	}
 	var (
 		base      = opts.Base
+		head      = opts.Head
 		diffBytes []byte
 		rangeText string
 		err       error
 	)
+	if head == "" {
+		head = "HEAD"
+	}
 	if opts.Dirty {
 		opts.Logf("diffing uncommitted changes in %s (git diff HEAD) ...", opts.RepoDir)
 		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs("HEAD")...)
@@ -45,6 +49,16 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 			return source.Result{}, fmt.Errorf("git diff HEAD: %w", err)
 		}
 		rangeText = "HEAD (uncommitted)"
+		base, head = "HEAD", "WORKTREE"
+	} else if opts.Commit != "" {
+		base = opts.Commit + "^"
+		head = opts.Commit
+		rangeText = base + ".." + head
+		opts.Logf("diffing commit %s in %s ...", opts.Commit, opts.RepoDir)
+		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(rangeText)...)
+		if err != nil {
+			return source.Result{}, fmt.Errorf("git diff %s: %w", rangeText, err)
+		}
 	} else {
 		if base == "" {
 			base, err = DetectBase(ctx, opts.RepoDir, runner)
@@ -52,32 +66,42 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 				return source.Result{}, err
 			}
 		}
-		opts.Logf("diffing %s...HEAD in %s ...", base, opts.RepoDir)
-		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(base+"...HEAD")...)
+		opts.Logf("diffing %s...%s in %s ...", base, head, opts.RepoDir)
+		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(base+"..."+head)...)
 		if err != nil {
-			return source.Result{}, fmt.Errorf("git diff %s...HEAD: %w", base, err)
+			return source.Result{}, fmt.Errorf("git diff %s...%s: %w", base, head, err)
 		}
-		rangeText = base + "...HEAD"
-		if len(bytes.TrimSpace(diffBytes)) == 0 {
+		rangeText = base + "..." + head
+		if len(bytes.TrimSpace(diffBytes)) == 0 && opts.Head == "" {
 			opts.Logf("no committed changes vs %s; falling back to uncommitted changes (git diff HEAD)", base)
 			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs("HEAD")...)
 			if err != nil {
 				return source.Result{}, fmt.Errorf("git diff HEAD: %w", err)
 			}
 			rangeText = "HEAD (uncommitted)"
+			base, head = "HEAD", "WORKTREE"
 		}
 	}
-	branch := "HEAD"
-	if out, branchErr := runner.Run(ctx, opts.RepoDir, "rev-parse", "--abbrev-ref", "HEAD"); branchErr == nil {
+	branchRef := head
+	if opts.Dirty || head == "WORKTREE" {
+		branchRef = "HEAD"
+	}
+	branch := branchRef
+	if out, branchErr := runner.Run(ctx, opts.RepoDir, "rev-parse", "--abbrev-ref", branchRef); branchErr == nil {
 		branch = strings.TrimSpace(string(out))
 	}
 	repoName := filepath.Base(opts.RepoDir)
 	title := fmt.Sprintf("%s: %s vs %s", repoName, branch, base)
 	if opts.Dirty {
 		title = fmt.Sprintf("%s: %s uncommitted changes", repoName, branch)
+	} else if opts.Commit != "" {
+		title = fmt.Sprintf("%s: commit %s", repoName, opts.Commit)
 	}
 	return source.Result{
-		Diff: diffBytes,
+		Diff:    diffBytes,
+		BaseRef: base,
+		HeadRef: head,
+		Dirty:   opts.Dirty || rangeText == "HEAD (uncommitted)",
 		Source: document.Source{
 			Title:   title,
 			Range:   rangeText,

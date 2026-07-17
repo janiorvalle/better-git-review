@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/janiorvalle/better-git-review/internal/provider"
 )
@@ -16,13 +17,24 @@ func (Adapter) Name() string {
 	return "claude-cli"
 }
 
-func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, error) {
+func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, string, []string, error) {
 	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "sonnet")
-	return &CLI{Model: model}, model, nil
+	reasoning := provider.ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "")
+	if err := provider.ValidateReasoning("claude-cli", reasoning, claudeReasoningLevels...); err != nil {
+		return nil, "", "", nil, err
+	}
+	effortSupported := supportsEffort()
+	warnings := []string(nil)
+	if reasoning != "" && !effortSupported {
+		warnings = append(warnings, "installed claude-cli does not support --effort; continuing without applying reasoning")
+	}
+	return &CLI{Model: model, Reasoning: reasoning, EffortSupported: effortSupported}, model, reasoning, warnings, nil
 }
 
 type CLI struct {
-	Model string
+	Model           string
+	Reasoning       string
+	EffortSupported bool
 }
 
 func (p *CLI) Name() string { return "claude-cli" }
@@ -41,18 +53,44 @@ func (p *CLI) Complete(ctx context.Context, prompt string) (string, error) {
 		return "", err
 	}
 	defer os.RemoveAll(isolatedDir)
-	output, err := provider.RunCommand(ctx, isolatedDir, []byte(prompt), "claude",
+	args := []string{
 		"-p",
 		"--safe-mode",
 		"--tools", "",
 		"--no-session-persistence",
 		"--model", p.Model,
 		"--output-format", "json",
-	)
+	}
+	if p.Reasoning != "" && p.EffortSupported {
+		args = append(args, "--effort", p.Reasoning)
+	}
+	output, err := provider.RunCommand(ctx, isolatedDir, []byte(prompt), "claude", args...)
 	if err != nil {
 		return "", err
 	}
 	return ParseOutput(output)
+}
+
+func (p *CLI) Models(context.Context) ([]provider.ModelOption, error) {
+	return []provider.ModelOption{
+		{ID: "sonnet", Label: "Sonnet", Note: "recommended", Default: true},
+		{ID: "opus", Label: "Opus", Note: "highest capability"},
+		{ID: "haiku", Label: "Haiku", Note: "fastest"},
+	}, nil
+}
+
+func (p *CLI) ReasoningLevels() []string {
+	if !p.EffortSupported {
+		return nil
+	}
+	return append([]string(nil), claudeReasoningLevels...)
+}
+
+var claudeReasoningLevels = []string{"low", "medium", "high", "xhigh", "max"}
+
+func supportsEffort() bool {
+	output, err := exec.Command("claude", "--help").CombinedOutput()
+	return err == nil && strings.Contains(string(output), "--effort")
 }
 
 func ParseOutput(output []byte) (string, error) {

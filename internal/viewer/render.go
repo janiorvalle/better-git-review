@@ -7,6 +7,7 @@ import (
 	"html/template"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/media"
 )
 
 //go:embed template.html
@@ -15,7 +16,11 @@ var templateSource string
 var viewerTemplate = template.Must(template.New("viewer").Parse(templateSource))
 
 func Render(doc document.Document) ([]byte, error) {
-	page, err := buildPage(doc)
+	return RenderWithPreviews(doc, nil)
+}
+
+func RenderWithPreviews(doc document.Document, previews map[int]media.Preview) ([]byte, error) {
+	page, err := buildPageWithPreviews(doc, previews)
 	if err != nil {
 		return nil, err
 	}

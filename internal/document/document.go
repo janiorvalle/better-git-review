@@ -75,6 +75,7 @@ type Cohort struct {
 type Meta struct {
 	Provider  string `json:"provider"`
 	Model     string `json:"model"`
+	Reasoning string `json:"reasoning,omitempty"`
 	Generator string `json:"generator"`
 	Cached    bool   `json:"cached"`
 	Staged    bool   `json:"staged"`

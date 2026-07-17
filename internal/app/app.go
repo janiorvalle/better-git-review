@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -19,40 +20,59 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/blame"
 	"github.com/janiorvalle/better-git-review/internal/cache"
 	"github.com/janiorvalle/better-git-review/internal/config"
+	configureflow "github.com/janiorvalle/better-git-review/internal/configure"
 	"github.com/janiorvalle/better-git-review/internal/diff"
 	"github.com/janiorvalle/better-git-review/internal/document"
 	"github.com/janiorvalle/better-git-review/internal/guard"
+	"github.com/janiorvalle/better-git-review/internal/media"
+	"github.com/janiorvalle/better-git-review/internal/picker"
 	"github.com/janiorvalle/better-git-review/internal/provider"
 	"github.com/janiorvalle/better-git-review/internal/source"
+	"github.com/janiorvalle/better-git-review/internal/terminal"
 	"github.com/janiorvalle/better-git-review/internal/viewer"
 )
 
 type Environment struct {
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-	Getwd  func() (string, error)
+	Stdin     io.Reader
+	Stdout    io.Writer
+	Stderr    io.Writer
+	Getwd     func() (string, error)
+	StdinTTY  *bool
+	StderrTTY *bool
 }
 
 type options struct {
 	PR              string
 	DiffFile        string
 	Base            string
+	Head            string
+	Commit          string
 	RepoDir         string
 	Provider        string
 	Model           string
+	Reasoning       string
 	Out             string
 	Format          string
 	Open            bool
+	NoOpen          bool
 	Dirty           bool
 	NoCache         bool
 	Yes             bool
 	TrustRepoConfig bool
 	Version         bool
+	Interactive     bool
+	PickerQuery     string
+	ArgsPresent     bool
+	Configure       bool
 }
 
 func Run(ctx context.Context, args []string, env Environment) error {
 	env = fillEnvironment(env)
+	stdinIsTTY := ttyValue(env.StdinTTY, isTTY(env.Stdin))
+	stderrIsTTY := ttyValue(env.StderrTTY, isWriterTTY(env.Stderr))
+	if _, ok := env.Stdin.(*bufio.Reader); !ok {
+		env.Stdin = bufio.NewReader(env.Stdin)
+	}
 	opts, err := parseArgs(args, env)
 	if err != nil {
 		return err
@@ -64,45 +84,100 @@ func Run(ctx context.Context, args []string, env Environment) error {
 
 	repoRoot := source.RepoRoot(ctx, opts.RepoDir)
 	loadedConfig, err := config.Load(config.LoadOptions{
-		RepoDir:         repoRoot,
-		Flags:           config.Flags{Provider: opts.Provider},
-		AcceptRepoTrust: opts.TrustRepoConfig,
-		Yes:             opts.Yes,
-		Input:           env.Stdin,
-		Output:          env.Stderr,
-		InputIsTTY:      isTTY(env.Stdin),
+		RepoDir:    "",
+		Flags:      config.Flags{Provider: opts.Provider, Model: opts.Model, Reasoning: opts.Reasoning},
+		Input:      env.Stdin,
+		Output:     env.Stderr,
+		InputIsTTY: stdinIsTTY,
 	})
 	if err != nil {
 		return err
 	}
-
-	collected, err := collectStage(ctx, opts, repoRoot, env, defaultSourceRegistry())
+	if opts.Configure || (!loadedConfig.UserConfigFound && stdinIsTTY && !opts.ArgsPresent && !opts.Yes) {
+		configured, configureErr := configureflow.Run(ctx, configureflow.Options{
+			Current: loadedConfig.Config, ConfigPath: loadedConfig.UserConfigPath,
+			Registry: defaultProviderRegistry(), Input: env.Stdin, Output: env.Stderr,
+			Home: os.Getenv("HOME"), FirstRun: !opts.Configure,
+		})
+		if configureErr != nil {
+			return configureErr
+		}
+		if opts.Configure || !configured.ReviewNow {
+			return nil
+		}
+		loadedConfig.Config = configured.Config
+	} else if !loadedConfig.UserConfigFound && stdinIsTTY && opts.ArgsPresent && !opts.Yes {
+		fmt.Fprintln(env.Stderr, "  tip: run `bgr configure` to save provider, model, reasoning, and auto-open defaults")
+	}
+	loadedConfig, err = config.Load(config.LoadOptions{
+		RepoDir:         repoRoot,
+		Flags:           config.Flags{Provider: opts.Provider, Model: opts.Model, Reasoning: opts.Reasoning},
+		AcceptRepoTrust: opts.TrustRepoConfig,
+		Yes:             opts.Yes,
+		Input:           env.Stdin,
+		Output:          env.Stderr,
+		InputIsTTY:      stdinIsTTY,
+	})
 	if err != nil {
 		return err
 	}
-	files, err := parseStage(collected, logf(env.Stderr))
+	progress := terminal.New(env.Stderr, stderrIsTTY, os.Getenv("NO_COLOR") != "")
+
+	if opts.Interactive {
+		selected, pickErr := picker.Run(ctx, picker.Options{
+			RepoDir: repoRoot, Query: opts.PickerQuery, Input: env.Stdin, Output: env.Stderr,
+		})
+		if errors.Is(pickErr, picker.ErrQuit) {
+			return nil
+		}
+		if pickErr != nil {
+			return pickErr
+		}
+		opts = applyPickerSelection(opts, selected)
+	}
+	collected, err := collectStage(ctx, opts, repoRoot, env, progress.Logf, defaultSourceRegistry())
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(collected.Diff)) == 0 && stdinIsTTY && !opts.Interactive && !hasExplicitSource(opts) {
+		selected, pickErr := picker.Run(ctx, picker.Options{RepoDir: repoRoot, Input: env.Stdin, Output: env.Stderr})
+		if errors.Is(pickErr, picker.ErrQuit) {
+			return nil
+		}
+		if pickErr != nil {
+			return pickErr
+		}
+		opts = applyPickerSelection(opts, selected)
+		collected, err = collectStage(ctx, opts, repoRoot, env, progress.Logf, defaultSourceRegistry())
+		if err != nil {
+			return err
+		}
+	}
+	files, err := parseStage(collected, progress.Logf)
 	if err != nil {
 		return err
 	}
 
-	selection, err := selectStage(opts, loadedConfig.Config, env.Stderr, defaultProviderRegistry())
+	selection, err := selectStage(opts, loadedConfig.Config, progress, defaultProviderRegistry())
 	if err != nil {
 		return err
 	}
 
 	result, err := analyzeWithCacheStage(ctx, analyzeStageInput{
-		Options:   opts,
-		Env:       env,
-		Collected: collected,
-		Files:     files,
-		Selection: selection,
-		Getenv:    os.Getenv,
+		Options:    opts,
+		Env:        env,
+		Collected:  collected,
+		Files:      files,
+		Selection:  selection,
+		Getenv:     os.Getenv,
+		InputIsTTY: stdinIsTTY,
+		Progress:   progress,
 	})
 	if err != nil {
 		return err
 	}
 
-	content, err := renderStage(opts.Format, result)
+	content, err := renderStageWithSource(ctx, opts.Format, result, collected)
 	if err != nil {
 		return err
 	}
@@ -113,10 +188,11 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	if err := emitStage(outputPath, content); err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stderr, "\n  wrote %s\n", outputPath)
-	if opts.Open && opts.Format == "html" {
-		openBrowser(outputPath)
+	opened := false
+	if shouldOpen(opts, loadedConfig.Config, stderrIsTTY) {
+		opened = openBrowser(outputPath)
 	}
+	progress.Wrote(outputPath, opened)
 	return nil
 }
 
@@ -125,16 +201,19 @@ func collectStage(
 	opts options,
 	repoRoot string,
 	env Environment,
+	log func(string, ...any),
 	registry source.Registry,
 ) (source.Result, error) {
 	return registry.Collect(ctx, source.Options{
 		PR:       opts.PR,
 		DiffFile: opts.DiffFile,
 		Base:     opts.Base,
+		Head:     opts.Head,
+		Commit:   opts.Commit,
 		Dirty:    opts.Dirty,
 		RepoDir:  repoRoot,
 		Stdin:    env.Stdin,
-		Logf:     logf(env.Stderr),
+		Logf:     log,
 	})
 }
 
@@ -156,27 +235,33 @@ func parseStage(collected source.Result, log func(string, ...any)) ([]document.F
 func selectStage(
 	opts options,
 	loaded config.Config,
-	stderr io.Writer,
+	progress *terminal.Progress,
 	registry provider.Registry,
 ) (provider.Selection, error) {
 	selection, err := registry.Select(provider.SelectOptions{
-		Config:        loaded,
-		ModelOverride: opts.Model,
+		Config:            loaded,
+		ModelOverride:     opts.Model,
+		ReasoningOverride: opts.Reasoning,
 	})
 	if err != nil {
 		return provider.Selection{}, err
 	}
-	fmt.Fprintf(stderr, "  provider: %q / model: %q\n", selection.Provider.Name(), selection.Model)
+	progress.Provider(selection.Provider.Name(), selection.Model, selection.Reasoning)
+	for _, warning := range selection.Warnings {
+		progress.Warning(warning)
+	}
 	return selection, nil
 }
 
 type analyzeStageInput struct {
-	Options   options
-	Env       Environment
-	Collected source.Result
-	Files     []document.File
-	Selection provider.Selection
-	Getenv    func(string) string
+	Options    options
+	Env        Environment
+	Collected  source.Result
+	Files      []document.File
+	Selection  provider.Selection
+	Getenv     func(string) string
+	InputIsTTY bool
+	Progress   *terminal.Progress
 }
 
 func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (document.Document, error) {
@@ -185,7 +270,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 		return document.Document{}, err
 	}
 	if stageDecision.Staged {
-		logf(input.Env.Stderr)("analysis input is %d bytes (budget %d); using staged analysis",
+		input.Progress.Logf("analysis input is %d bytes (budget %d); using staged analysis",
 			stageDecision.InputBytes, stageDecision.Budget)
 	}
 
@@ -197,40 +282,49 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 		input.Collected.Diff,
 		input.Selection.Provider.Name(),
 		input.Selection.Model,
+		input.Selection.Reasoning,
 		document.SchemaVersion,
 	)
 	var result document.Document
+	analysisPerformed := false
 	if !input.Options.NoCache {
 		if cached, ok := cacheStore.Load(cacheKey); ok && cached.Meta.Staged == stageDecision.Staged {
-			logf(input.Env.Stderr)("cache hit")
+			input.Progress.Logf("cache hit")
 			cached.Source = input.Collected.Source
 			cached.Files = input.Files
 			result = cached
 		}
 	}
 	if result.SchemaVersion == 0 {
+		analysisPerformed = true
 		if err := guard.Confirm(
 			guard.AnalysisPlan(
 				len(input.Files),
 				stageDecision.Staged,
 				input.Selection.Provider.Name(),
 				input.Selection.Model,
+				input.Selection.Reasoning,
 			),
 			input.Options.Yes,
 			input.Env.Stdin,
 			input.Env.Stderr,
-			isTTY(input.Env.Stdin),
+			input.InputIsTTY,
 		); err != nil {
 			return document.Document{}, err
 		}
+		spinner := input.Progress.Start("analyzing...")
 		analysis, analysisErr := analyze.Run(ctx, analyze.Options{
 			Provider: input.Selection.Provider,
 			Source:   input.Collected.Source,
 			Files:    input.Files,
-			Logf:     logf(input.Env.Stderr),
-			Staged:   stageDecision.Staged,
-			Budget:   stageDecision.Budget,
+			Logf:     input.Progress.Logf,
+			Progress: func(completed, total int) {
+				spinner.Update(fmt.Sprintf("summarizing %d/%d ...", completed, total))
+			},
+			Staged: stageDecision.Staged,
+			Budget: stageDecision.Budget,
 		})
+		analysisDuration := spinner.Stop()
 		if analysisErr != nil {
 			return document.Document{}, analysisErr
 		}
@@ -242,6 +336,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 			Meta: document.Meta{
 				Provider:  input.Selection.Provider.Name(),
 				Model:     input.Selection.Model,
+				Reasoning: input.Selection.Reasoning,
 				Generator: document.Generator(),
 				Cached:    false,
 				Staged:    stageDecision.Staged,
@@ -252,13 +347,20 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 				return document.Document{}, fmt.Errorf("write cache: %w", err)
 			}
 		}
+		if input.Progress.Enabled() {
+			input.Progress.Successf("%d cohorts  in %s", len(result.Analysis.Cohorts), terminal.FormatDuration(analysisDuration))
+		}
 	}
-	logf(input.Env.Stderr)("organized into %d cohort(s)", len(result.Analysis.Cohorts))
-	if input.Options.PR == "" && input.Options.DiffFile == "" {
-		if result.Source.Range == "HEAD (uncommitted)" {
+	if input.Progress.Enabled() && !analysisPerformed {
+		input.Progress.Successf("%d cohorts  (cached)", len(result.Analysis.Cohorts))
+	} else if !input.Progress.Enabled() {
+		input.Progress.Logf("organized into %d cohort(s)", len(result.Analysis.Cohorts))
+	}
+	if input.Collected.Source.RepoDir != "" {
+		if input.Collected.Dirty {
 			blame.EnrichUncommitted(ctx, result.Source.RepoDir, result.Files, nil)
 		} else {
-			blame.Enrich(ctx, result.Source.RepoDir, result.Files, nil)
+			blame.EnrichRef(ctx, result.Source.RepoDir, input.Collected.HeadRef, result.Files, nil)
 		}
 	}
 	return result, nil
@@ -272,6 +374,10 @@ func validateCachedDocument(value document.Document) error {
 }
 
 func renderStage(format string, value document.Document) ([]byte, error) {
+	return renderStageWithSource(context.Background(), format, value, source.Result{})
+}
+
+func renderStageWithSource(ctx context.Context, format string, value document.Document, collected source.Result) ([]byte, error) {
 	if format == "json" {
 		encoded, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
@@ -279,7 +385,11 @@ func renderStage(format string, value document.Document) ([]byte, error) {
 		}
 		return append(encoded, '\n'), nil
 	}
-	return viewer.Render(value)
+	previews := media.Enrich(ctx, value.Files, media.Source{
+		RepoDir: collected.Source.RepoDir, BaseRef: collected.BaseRef,
+		HeadRef: collected.HeadRef, Dirty: collected.Dirty,
+	}, nil)
+	return viewer.RenderWithPreviews(value, previews)
 }
 
 func outputPath(opts options, sourceName string) (string, error) {
@@ -299,7 +409,12 @@ func parseArgs(args []string, env Environment) (options, error) {
 	if err != nil {
 		return options{}, err
 	}
-	var result options
+	result := options{ArgsPresent: len(args) > 0}
+	if len(args) > 0 && args[0] == "configure" {
+		result.Configure = true
+		args = args[1:]
+	}
+	args, result.PickerQuery = extractPickerQuery(args)
 	if len(args) > 0 && isPRNumber(args[0]) {
 		result.PR = args[0]
 		args = args[1:]
@@ -311,17 +426,23 @@ func parseArgs(args []string, env Environment) (options, error) {
 	}
 	flags.StringVar(&result.DiffFile, "diff", "", "unified diff file or - for stdin")
 	flags.StringVar(&result.Base, "base", "", "base git ref")
+	flags.StringVar(&result.Head, "head", "", "head git ref (paired with --base)")
+	flags.StringVar(&result.Commit, "commit", "", "review exactly one commit")
 	flags.StringVar(&result.RepoDir, "C", cwd, "repository directory")
 	flags.StringVar(&result.Provider, "provider", "", "analysis provider")
 	flags.StringVar(&result.Model, "model", "", "provider model")
+	flags.StringVar(&result.Reasoning, "reasoning", "", "provider reasoning effort")
 	flags.StringVar(&result.Out, "out", "", "output path")
 	flags.StringVar(&result.Format, "format", "html", "output format: html or json")
 	flags.BoolVar(&result.Open, "open", false, "open generated HTML in the default browser")
+	flags.BoolVar(&result.NoOpen, "no-open", false, "do not open generated HTML")
 	flags.BoolVar(&result.Dirty, "dirty", false, "review only uncommitted changes (git diff HEAD)")
 	flags.BoolVar(&result.NoCache, "no-cache", false, "bypass analysis cache")
 	flags.BoolVar(&result.Yes, "yes", false, "skip confirmations")
 	flags.BoolVar(&result.TrustRepoConfig, "trust-repo-config", false, "trust current repo provider config")
 	flags.BoolVar(&result.Version, "version", false, "print version")
+	flags.BoolVar(&result.Interactive, "i", false, "interactively choose what to review")
+	flags.BoolVar(&result.Interactive, "interactive", false, "interactively choose what to review")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return options{}, err
@@ -333,6 +454,12 @@ func parseArgs(args []string, env Environment) (options, error) {
 		return options{}, fmt.Errorf("expected at most one PR number")
 	}
 	if len(positionals) == 1 {
+		if result.Interactive {
+			result.PickerQuery = positionals[0]
+			positionals = nil
+		}
+	}
+	if len(positionals) == 1 {
 		if result.PR != "" {
 			return options{}, fmt.Errorf("expected at most one PR number")
 		}
@@ -341,14 +468,23 @@ func parseArgs(args []string, env Environment) (options, error) {
 		}
 		result.PR = positionals[0]
 	}
+	if result.Interactive && result.PR != "" {
+		return options{}, fmt.Errorf("-i cannot be used with a PR number")
+	}
+	if result.Open && result.NoOpen {
+		return options{}, fmt.Errorf("--open and --no-open cannot be used together")
+	}
 	if result.PR != "" && result.DiffFile != "" {
 		return options{}, fmt.Errorf("PR_NUMBER and --diff cannot be used together")
 	}
-	if result.Base != "" && (result.PR != "" || result.DiffFile != "") {
-		return options{}, fmt.Errorf("--base cannot be used with PR_NUMBER or --diff")
+	if (result.Base != "" || result.Head != "") && (result.PR != "" || result.DiffFile != "") {
+		return options{}, fmt.Errorf("--base/--head cannot be used with PR_NUMBER or --diff")
 	}
-	if result.Dirty && (result.PR != "" || result.DiffFile != "" || result.Base != "") {
-		return options{}, fmt.Errorf("--dirty cannot be used with PR_NUMBER, --diff, or --base")
+	if result.Dirty && (result.PR != "" || result.DiffFile != "" || result.Base != "" || result.Head != "" || result.Commit != "") {
+		return options{}, fmt.Errorf("--dirty cannot be used with PR_NUMBER, --diff, --base, --head, or --commit")
+	}
+	if result.Commit != "" && (result.PR != "" || result.DiffFile != "" || result.Base != "" || result.Head != "") {
+		return options{}, fmt.Errorf("--commit cannot be used with PR_NUMBER, --diff, --base, or --head")
 	}
 	if result.Format != "html" && result.Format != "json" {
 		return options{}, fmt.Errorf("--format must be html or json")
@@ -358,6 +494,49 @@ func parseArgs(args []string, env Environment) (options, error) {
 		return options{}, err
 	}
 	return result, nil
+}
+
+func hasExplicitSource(opts options) bool {
+	return opts.PR != "" || opts.DiffFile != "" || opts.Base != "" || opts.Head != "" || opts.Commit != "" || opts.Dirty
+}
+
+func extractPickerQuery(args []string) ([]string, string) {
+	for index, arg := range args {
+		if arg != "-i" && arg != "--interactive" {
+			continue
+		}
+		if index+1 >= len(args) || strings.HasPrefix(args[index+1], "-") {
+			return args, ""
+		}
+		query := args[index+1]
+		cleaned := append([]string(nil), args[:index+1]...)
+		cleaned = append(cleaned, args[index+2:]...)
+		return cleaned, query
+	}
+	return args, ""
+}
+
+func applyPickerSelection(opts options, selected picker.Selection) options {
+	opts.PR = selected.PR
+	opts.Base = selected.Base
+	opts.Head = selected.Head
+	opts.Commit = selected.Commit
+	opts.Dirty = selected.Dirty
+	opts.DiffFile = ""
+	return opts
+}
+
+func shouldOpen(opts options, cfg config.Config, stderrIsTTY bool) bool {
+	if opts.Format != "html" || opts.NoOpen {
+		return false
+	}
+	if opts.Open {
+		return true
+	}
+	if !stderrIsTTY {
+		return false
+	}
+	return cfg.AutoOpen == nil || *cfg.AutoOpen
 }
 
 func isPRNumber(value string) bool {
@@ -385,13 +564,13 @@ func writeOutput(path string, content []byte) error {
 	return nil
 }
 
-func openBrowser(path string) {
+func openBrowser(path string) bool {
 	name, args, ok := browserCommand(runtime.GOOS, path)
 	if !ok {
-		return
+		return false
 	}
 	command := exec.Command(name, args...)
-	_ = command.Run()
+	return command.Run() == nil
 }
 
 func browserCommand(goos, path string) (string, []string, bool) {
@@ -432,30 +611,47 @@ func isTTY(input io.Reader) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func logf(output io.Writer) func(string, ...any) {
-	return func(format string, args ...any) {
-		fmt.Fprintf(output, "  "+format+"\n", args...)
+func isWriterTTY(output io.Writer) bool {
+	file, ok := output.(*os.File)
+	if !ok {
+		return false
 	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func ttyValue(override *bool, detected bool) bool {
+	if override != nil {
+		return *override
+	}
+	return detected
 }
 
 const usage = `bgr - turn a diff into a guided review document
 
 USAGE
   bgr [PR_NUMBER] [flags]
+	bgr -i [query]
+	bgr configure
 
 SOURCES
   PR_NUMBER              GitHub PR via gh
   --diff <file|->        Unified diff file or stdin
   --base <ref>           Diff <ref>...HEAD (auto-detected by default)
+	--head <ref>           Diff <base>...<ref>
+	--commit <sha>         Review exactly one commit
   --dirty                Review only uncommitted changes (git diff HEAD)
+	-i, --interactive      Choose from changes, PRs, branches, and commits
 
 FLAGS
   -C <dir>               Repository directory (default: cwd)
   --provider <name>      Force claude-cli, codex-cli, openrouter, or mock
   --model <model>        Model override for the chosen provider
+	--reasoning <level>    Reasoning effort override
   --format html|json     Output format (default: html)
   --out <file>           Output path
-  --open                 Open generated HTML in the default browser
+	--open                 Force opening generated HTML
+	--no-open              Do not open generated HTML in a TTY
   --no-cache             Bypass the analysis cache
   --yes                  Skip interactive confirmations
   --trust-repo-config    Trust the current repo provider config fingerprint

@@ -128,7 +128,7 @@ func checkInternalImport(packagePath, importPath string) string {
 	case "internal/diff":
 		return allowOnly(packagePath, importedInternal, "document")
 	case "internal/viewer":
-		return allowOnly(packagePath, importedInternal, "document")
+		return allowOnly(packagePath, importedInternal, "document", "media")
 	case "internal/cache":
 		return allowOnly(packagePath, importedInternal, "document", "xdg")
 	}
@@ -141,7 +141,7 @@ func checkInternalImport(packagePath, importPath string) string {
 	}
 	if strings.HasPrefix(packagePath, "internal/source/") {
 		allowed := []string{"source", "document"}
-		if packagePath == "internal/source/git" {
+		if packagePath == "internal/source/git" || packagePath == "internal/source/github" {
 			allowed = append(allowed, "gitexec")
 		}
 		return allowOnly(packagePath, importedInternal, allowed...)

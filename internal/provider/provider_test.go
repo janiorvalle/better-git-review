@@ -57,9 +57,10 @@ func (a fakeAdapter) Name() string {
 	return a.name
 }
 
-func (a fakeAdapter) New(opts AdapterOptions) (Provider, string, error) {
+func (a fakeAdapter) New(opts AdapterOptions) (Provider, string, string, []string, error) {
 	model := ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "default")
-	return fakeProvider{name: a.name, available: a.available}, model, nil
+	reasoning := ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "")
+	return fakeProvider{name: a.name, available: a.available}, model, reasoning, nil, nil
 }
 
 type fakeProvider struct {

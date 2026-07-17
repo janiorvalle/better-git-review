@@ -290,6 +290,14 @@ button { font: inherit; }
 .file-stub { padding: 8px 14px; border-bottom: 1px solid var(--note-border); background: var(--note-bg); color: var(--note-fg); font-size: 12px; font-weight: 600; }
 .file.collapsed .file-body, .file.collapsed .file-summary, .file.collapsed .file-stub { display: none; }
 .binary { padding: 24px; color: var(--muted); text-align: center; font-family: var(--mono); }
+.binary-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: var(--canvas-inset); }
+.binary-pane { min-width: 0; min-height: 220px; display: grid; grid-template-rows: minmax(180px, 1fr) auto; border-right: 1px solid var(--border-muted); }
+.binary-pane:last-child { border-right: 0; }
+.binary-image-wrap { display: grid; place-items: center; padding: 18px; background-color: var(--card); background-image: linear-gradient(45deg, var(--canvas-inset) 25%, transparent 25%), linear-gradient(-45deg, var(--canvas-inset) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--canvas-inset) 75%), linear-gradient(-45deg, transparent 75%, var(--canvas-inset) 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0; }
+.binary-image-wrap img { display: block; max-width: 100%; max-height: 520px; object-fit: contain; }
+.binary-missing { display: grid; place-items: center; min-height: 180px; padding: 18px; color: var(--muted); font: 12px var(--mono); background: repeating-linear-gradient(135deg, transparent 0 8px, var(--border-muted) 8px 9px); }
+.binary-caption { padding: 9px 12px; color: var(--muted); font: 11.5px var(--mono); border-top: 1px solid var(--border-muted); background: var(--card-head); }
+.binary-story { grid-column: 1 / -1; padding: 9px 12px; color: var(--muted); text-align: center; font: 11.5px var(--mono); border-top: 1px solid var(--border-muted); background: var(--card); }
 
 /* ---------- diff tables ---------- */
 .diff-scroll { overflow-x: auto; background: var(--canvas-inset); }
@@ -360,6 +368,8 @@ body[data-view="split"] .view-split { display: block; }
   .file-header { top: 0; position: static; flex-wrap: wrap; }
   .status-tag, .file-stepper { display: none; }
   .split-table { min-width: 900px; }
+  .binary-preview { grid-template-columns: 1fr; }
+  .binary-pane { border-right: 0; border-bottom: 1px solid var(--border-muted); }
   .pager { grid-template-columns: 1fr 1fr; }
   .pager-count { grid-column: 1 / -1; grid-row: 1; text-align: center; }
 }
@@ -453,7 +463,19 @@ body[data-view="split"] .view-split { display: block; }
             {{if $file.Summary}}<div class="file-summary">{{$file.Summary}}</div>{{end}}
             {{if $file.Stubbed}}<div class="file-stub">No model summary - grouped from path only.</div>{{end}}
             <div class="file-body">
-              {{if $file.Binary}}<div class="binary">Binary file</div>{{else}}
+              {{if $file.Binary}}
+                {{if $file.ImagePreview}}<div class="binary-preview">
+                  <div class="binary-pane">
+                    {{with $file.OldImage}}<div class="binary-image-wrap"><img src="{{.DataURI}}" alt="Before image preview"></div><div class="binary-caption">Before · {{.SizeLabel}}{{if .Dimensions}} · {{.Dimensions}} px{{end}}</div>
+                    {{else}}<div class="binary-missing">No previous image</div><div class="binary-caption">Before</div>{{end}}
+                  </div>
+                  <div class="binary-pane">
+                    {{with $file.NewImage}}<div class="binary-image-wrap"><img src="{{.DataURI}}" alt="After image preview"></div><div class="binary-caption">After · {{.SizeLabel}}{{if .Dimensions}} · {{.Dimensions}} px{{end}}</div>
+                    {{else}}<div class="binary-missing">No new image</div><div class="binary-caption">After</div>{{end}}
+                  </div>
+                  <div class="binary-story">{{$file.BinaryLabel}}</div>
+                </div>{{else}}<div class="binary">{{$file.BinaryLabel}}</div>{{end}}
+              {{else}}
               <div class="view-unified diff-scroll">
                 <table class="diff-table" aria-label="Unified diff for {{$file.Path}}">
                 <colgroup><col class="number-column"><col class="number-column"><col class="prefix-column"><col></colgroup>

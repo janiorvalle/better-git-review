@@ -53,10 +53,13 @@ func DiffArgs(target string) []string {
 	}
 }
 
-func BlameArgs(lineRange, path string) []string {
+func BlameArgs(ref, lineRange, path string) []string {
+	if ref == "" {
+		ref = "HEAD"
+	}
 	return []string{
 		"blame", "--porcelain", "--no-textconv",
 		"-L", lineRange,
-		"HEAD", "--", path,
+		ref, "--", path,
 	}
 }
