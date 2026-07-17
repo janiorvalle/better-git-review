@@ -14,6 +14,8 @@ import (
 	"github.com/janiorvalle/better-git-review/internal/provider"
 )
 
+var ErrCancelled = errors.New("configuration cancelled")
+
 type Options struct {
 	Current    config.Config
 	ConfigPath string
@@ -275,6 +277,9 @@ func installSkill(reader *bufio.Reader, output io.Writer, home string) error {
 func prompt(reader *bufio.Reader, output io.Writer, label, defaultValue string) (string, error) {
 	fmt.Fprintf(output, "%s [%s]: ", label, defaultValue)
 	answer, err := reader.ReadString('\n')
+	if errors.Is(err, io.EOF) && answer == "" {
+		return "", ErrCancelled
+	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
@@ -292,6 +297,9 @@ func promptYesNo(reader *bufio.Reader, output io.Writer, label string, defaultVa
 	}
 	fmt.Fprintf(output, "%s [%s]: ", label, suffix)
 	answer, err := reader.ReadString('\n')
+	if errors.Is(err, io.EOF) && answer == "" {
+		return false, ErrCancelled
+	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, err
 	}

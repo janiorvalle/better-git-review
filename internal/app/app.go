@@ -467,8 +467,8 @@ func parseArgs(args []string, env Environment) (options, error) {
 		}
 		result.PR = positionals[0]
 	}
-	if result.Interactive && result.PR != "" {
-		return options{}, fmt.Errorf("-i cannot be used with a PR number")
+	if result.Interactive && hasExplicitSource(result) {
+		return options{}, fmt.Errorf("-i cannot be used with PR_NUMBER, --diff, --base, --head, --commit, or --dirty")
 	}
 	if result.Open && result.NoOpen {
 		return options{}, fmt.Errorf("--open and --no-open cannot be used together")

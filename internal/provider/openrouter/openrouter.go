@@ -76,7 +76,7 @@ func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
 				Completion string `json:"completion"`
 			} `json:"pricing"`
 			Reasoning struct {
-				SupportedEfforts []string `json:"supported_efforts"`
+				SupportedEfforts json.RawMessage `json:"supported_efforts"`
 			} `json:"reasoning"`
 		} `json:"data"`
 	}
@@ -94,8 +94,17 @@ func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
 			ID: model.ID, Label: provider.DefaultString(model.Name, model.ID), Note: note,
 			Default: model.ID == "z-ai/glm-5.2",
 		})
-		if len(model.Reasoning.SupportedEfforts) > 0 {
-			p.reasoningByModel[model.ID] = append([]string(nil), model.Reasoning.SupportedEfforts...)
+		rawEfforts := model.Reasoning.SupportedEfforts
+		switch {
+		case len(rawEfforts) == 0:
+			// Omitted means this model does not expose effort selection.
+		case strings.TrimSpace(string(rawEfforts)) == "null":
+			p.reasoningByModel[model.ID] = gatewayReasoningLevels()
+		default:
+			var efforts []string
+			if json.Unmarshal(rawEfforts, &efforts) == nil && len(efforts) > 0 {
+				p.reasoningByModel[model.ID] = efforts
+			}
 		}
 	}
 	if len(result) == 0 {
@@ -128,6 +137,10 @@ func openRouterReasoningLevels(model string) []string {
 	if model == "z-ai/glm-5.2" {
 		return []string{"xhigh", "high"}
 	}
+	return gatewayReasoningLevels()
+}
+
+func gatewayReasoningLevels() []string {
 	return []string{"max", "xhigh", "high", "medium", "low", "minimal", "none"}
 }
 

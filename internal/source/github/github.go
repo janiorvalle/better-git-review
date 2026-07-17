@@ -88,6 +88,8 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		if err != nil {
 			return source.Result{}, fmt.Errorf("%s; local-git fallback failed: %w. Run PR mode from a clone with a remote matching the PR repository", fallbackOn, err)
 		}
+	} else if err := s.fetchObjects(ctx, opts.RepoDir, meta.URL, meta.BaseRefOID, meta.HeadRefOID, false); err != nil {
+		opts.Logf("local PR objects unavailable; binary previews may be limited")
 	}
 
 	url := meta.URL
@@ -129,28 +131,50 @@ func (s Source) diffWithRetry(ctx context.Context, runner Runner, opts source.Op
 }
 
 func (s Source) localDiff(ctx context.Context, repoDir, prURL, baseOID, headOID string) ([]byte, error) {
-	if baseOID == "" || headOID == "" {
-		return nil, fmt.Errorf("PR metadata did not include base/head object IDs")
-	}
-	runner := s.GitRunner
-	if runner == nil {
-		runner = gitexec.ExecRunner{}
-	}
-	if _, err := runner.Run(ctx, repoDir, "rev-parse", "--is-inside-work-tree"); err != nil {
-		return nil, fmt.Errorf("%q is not a usable local git repository: %w", repoDir, err)
-	}
-	remote, err := matchingRemote(ctx, runner, repoDir, prURL)
-	if err != nil {
+	if err := s.fetchObjects(ctx, repoDir, prURL, baseOID, headOID, true); err != nil {
 		return nil, err
 	}
-	if _, err := runner.Run(ctx, repoDir, "fetch", "--no-tags", remote, baseOID, headOID); err != nil {
-		return nil, fmt.Errorf("git fetch %s <PR object IDs>: %w", remote, err)
-	}
+	runner := s.gitRunner()
 	diffBytes, err := runner.Run(ctx, repoDir, gitexec.DiffArgs(baseOID+"..."+headOID)...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff %s...%s: %w", baseOID, headOID, err)
 	}
 	return diffBytes, nil
+}
+
+func (s Source) fetchObjects(ctx context.Context, repoDir, prURL, baseOID, headOID string, force bool) error {
+	if baseOID == "" || headOID == "" {
+		return fmt.Errorf("PR metadata did not include base/head object IDs")
+	}
+	runner := s.gitRunner()
+	if _, err := runner.Run(ctx, repoDir, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return fmt.Errorf("%q is not a usable local git repository: %w", repoDir, err)
+	}
+	basePresent := objectExists(ctx, runner, repoDir, baseOID)
+	headPresent := objectExists(ctx, runner, repoDir, headOID)
+	if !force && basePresent && headPresent {
+		return nil
+	}
+	remote, err := matchingRemote(ctx, runner, repoDir, prURL)
+	if err != nil {
+		return err
+	}
+	if _, err := runner.Run(ctx, repoDir, "fetch", "--no-tags", remote, baseOID, headOID); err != nil {
+		return fmt.Errorf("git fetch %s <PR object IDs>: %w", remote, err)
+	}
+	return nil
+}
+
+func objectExists(ctx context.Context, runner gitexec.Runner, repoDir, oid string) bool {
+	_, err := runner.Run(ctx, repoDir, "cat-file", "-e", oid+"^{commit}")
+	return err == nil
+}
+
+func (s Source) gitRunner() gitexec.Runner {
+	if s.GitRunner != nil {
+		return s.GitRunner
+	}
+	return gitexec.ExecRunner{}
 }
 
 func matchingRemote(ctx context.Context, runner gitexec.Runner, repoDir, prURL string) (string, error) {

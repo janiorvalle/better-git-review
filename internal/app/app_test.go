@@ -44,6 +44,11 @@ func TestParseArgsRejectsConflictingSources(t *testing.T) {
 		{"--head", "topic", "--dirty"},
 		{"--commit", "abc", "--base", "main"},
 		{"--commit", "abc", "123"},
+		{"-i", "--diff", "change.patch"},
+		{"-i", "--base", "main"},
+		{"-i", "--head", "topic"},
+		{"-i", "--commit", "abc"},
+		{"-i", "--dirty"},
 	}
 	for _, args := range tests {
 		if _, err := parseArgs(args, Environment{

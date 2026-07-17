@@ -190,6 +190,22 @@ func TestLiveCatalogDoesNotInventReasoningForUnsupportedModel(t *testing.T) {
 	}
 }
 
+func TestLiveCatalogNullReasoningUsesGatewayLevels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"data":[{"id":"example/gateway-reasoning","name":"Gateway Reasoning","context_length":1000,"pricing":{},"reasoning":{"supported_efforts":null}}]}`))
+	}))
+	defer server.Close()
+	client := testClient(server)
+	if _, err := client.Models(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	client.SetCatalogModel("example/gateway-reasoning")
+	if levels := client.ReasoningLevels(); len(levels) == 0 || levels[0] != "max" {
+		t.Fatalf("levels = %#v", levels)
+	}
+}
+
 func testClient(server *httptest.Server) *Client {
 	return &Client{
 		Model: "test", APIKeyEnv: "TEST_KEY", BaseURL: server.URL,
