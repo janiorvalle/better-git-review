@@ -65,9 +65,12 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		branchRef = headRef
 		rangeText = opts.Commit + "^.." + opts.Commit
 		opts.Logf("diffing commit %s in %s ...", opts.Commit, opts.RepoDir)
-		parent, parentErr := runner.Run(ctx, opts.RepoDir, "rev-parse", "--verify", "--quiet", headRef+"^")
-		if parentErr == nil {
-			baseRef = strings.TrimSpace(string(parent))
+		parent, root, parentErr := commitParent(ctx, opts.RepoDir, headRef, runner)
+		if parentErr != nil {
+			return source.Result{}, parentErr
+		}
+		if !root {
+			baseRef = parent
 			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(baseRef+".."+headRef)...)
 		} else {
 			baseRef = ""
@@ -139,6 +142,28 @@ func resolveCommit(ctx context.Context, repoDir, ref string, runner gitexec.Runn
 		return "", fmt.Errorf("resolve git ref %s: %w", ref, err)
 	}
 	return strings.TrimSpace(string(resolved)), nil
+}
+
+func commitParent(ctx context.Context, repoDir, commit string, runner gitexec.Runner) (string, bool, error) {
+	content, err := runner.Run(ctx, repoDir, "cat-file", "-p", commit)
+	if err != nil {
+		return "", false, fmt.Errorf("read commit %s: %w", commit, err)
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		if line == "" {
+			break
+		}
+		parent, found := strings.CutPrefix(line, "parent ")
+		if !found {
+			continue
+		}
+		parent = strings.TrimSpace(parent)
+		if _, err := runner.Run(ctx, repoDir, "cat-file", "-e", parent+"^{commit}"); err != nil {
+			return "", false, fmt.Errorf("parent %s for commit %s is unavailable; deepen or fetch the clone before reviewing this commit", parent, commit)
+		}
+		return parent, false, nil
+	}
+	return "", true, nil
 }
 
 func DetectBase(ctx context.Context, repoDir string, runner gitexec.Runner) (string, error) {

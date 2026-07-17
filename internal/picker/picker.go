@@ -122,7 +122,7 @@ func Discover(ctx context.Context, repoDir string, gitRunner gitexec.Runner, com
 	}
 	base, err := gitsource.DetectBase(ctx, repoDir, gitRunner)
 	result := Catalog{}
-	if status, statusErr := gitRunner.Run(ctx, repoDir, "status", "--porcelain"); statusErr == nil && len(bytes.TrimSpace(status)) > 0 {
+	if status, statusErr := gitRunner.Run(ctx, repoDir, "status", "--porcelain", "--untracked-files=no"); statusErr == nil && len(bytes.TrimSpace(status)) > 0 {
 		result.Dirty = []Item{{
 			Kind: Dirty, Label: "Uncommitted changes", Search: "dirty working tree uncommitted",
 			Command: "bgr --dirty",

@@ -42,11 +42,14 @@ type Client struct {
 	Getenv           func(string) string
 	HTTPClient       *http.Client
 	reasoningByModel map[string][]string
+	catalogLoaded    bool
 }
 
 func (p *Client) Name() string { return "openrouter" }
 
 func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
+	p.catalogLoaded = false
+	p.reasoningByModel = nil
 	client := p.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
@@ -98,10 +101,14 @@ func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
 	if len(result) == 0 {
 		return CuratedModels(), nil
 	}
+	p.catalogLoaded = true
 	return result, nil
 }
 
 func (p *Client) ReasoningLevels() []string {
+	if p.catalogLoaded {
+		return append([]string(nil), p.reasoningByModel[p.Model]...)
+	}
 	if levels := p.reasoningByModel[p.Model]; len(levels) > 0 {
 		return append([]string(nil), levels...)
 	}

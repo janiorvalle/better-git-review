@@ -95,6 +95,28 @@ func TestCollectSupportsRootCommit(t *testing.T) {
 	}
 }
 
+func TestCollectRejectsUnavailableParentAtShallowBoundary(t *testing.T) {
+	origin := t.TempDir()
+	runGitTest(t, origin, "init", "-b", "main")
+	runGitTest(t, origin, "config", "user.email", "source@example.com")
+	runGitTest(t, origin, "config", "user.name", "Source Test")
+	writeGitFile(t, origin, "file.txt", "one\n")
+	runGitTest(t, origin, "add", "file.txt")
+	runGitTest(t, origin, "commit", "-m", "one")
+	writeGitFile(t, origin, "file.txt", "two\n")
+	runGitTest(t, origin, "commit", "-am", "two")
+
+	parent := t.TempDir()
+	shallow := filepath.Join(parent, "shallow")
+	runGitTest(t, parent, "clone", "--depth", "1", "--no-local", origin, shallow)
+	_, err := (Source{}).Collect(context.Background(), source.Options{
+		RepoDir: shallow, Commit: "HEAD", Logf: func(string, ...any) {},
+	})
+	if err == nil || !strings.Contains(err.Error(), "deepen or fetch") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func writeGitFile(t *testing.T, repo, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o600); err != nil {
