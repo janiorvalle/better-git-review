@@ -98,6 +98,7 @@ func Run(ctx context.Context, args []string, env Environment) error {
 			Current: loadedConfig.Config, ConfigPath: loadedConfig.UserConfigPath,
 			Registry: defaultProviderRegistry(), Input: env.Stdin, Output: env.Stderr,
 			Home: os.Getenv("HOME"), FirstRun: !opts.Configure,
+			Styled: stderrIsTTY && os.Getenv("NO_COLOR") == "",
 		})
 		if configureErr != nil {
 			return configureErr
@@ -107,7 +108,7 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		}
 		loadedConfig.Config = configured.Config
 	} else if !loadedConfig.UserConfigFound && stdinIsTTY && opts.ArgsPresent && !opts.Yes {
-		fmt.Fprintln(env.Stderr, "  tip: run `bgr configure` to save provider, model, reasoning, and auto-open defaults")
+		fmt.Fprintln(env.Stderr, "  tip: run `bgr configure` once to save these defaults")
 	}
 	loadedConfig, err = config.Load(config.LoadOptions{
 		RepoDir:         repoRoot,
@@ -270,8 +271,8 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 		return document.Document{}, err
 	}
 	if stageDecision.Staged {
-		input.Progress.Logf("analysis input is %d bytes (budget %d); using staged analysis",
-			stageDecision.InputBytes, stageDecision.Budget)
+		input.Progress.Logf("big diff - roughly %.1fx the single-pass budget, so files get summarized first",
+			float64(stageDecision.InputBytes)/float64(stageDecision.Budget))
 	}
 
 	cacheStore, err := cache.Default(validateCachedDocument)
@@ -289,7 +290,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 	analysisPerformed := false
 	if !input.Options.NoCache {
 		if cached, ok := cacheStore.Load(cacheKey); ok && cached.Meta.Staged == stageDecision.Staged {
-			input.Progress.Logf("cache hit")
+			input.Progress.Logf("cache hit - reusing the saved analysis, no model calls needed")
 			cached.Source = input.Collected.Source
 			cached.Files = input.Files
 			result = cached
@@ -312,7 +313,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 		); err != nil {
 			return document.Document{}, err
 		}
-		spinner := input.Progress.Start("analyzing...")
+		spinner := input.Progress.Start("analyzing the diff...")
 		analysis, analysisErr := analyze.Run(ctx, analyze.Options{
 			Provider: input.Selection.Provider,
 			Source:   input.Collected.Source,
@@ -353,7 +354,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 	if input.Progress.Enabled() && !analysisPerformed {
 		input.Progress.Successf("%d cohorts  (cached)", len(result.Analysis.Cohorts))
 	} else if !input.Progress.Enabled() {
-		input.Progress.Logf("organized into %d cohort(s)", len(result.Analysis.Cohorts))
+		input.Progress.Successf("grouped into %d review steps", len(result.Analysis.Cohorts))
 	}
 	if input.Collected.Source.RepoDir != "" {
 		if input.Collected.Dirty {

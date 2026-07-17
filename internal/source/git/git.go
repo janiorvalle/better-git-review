@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -50,7 +51,7 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		if err != nil {
 			return source.Result{}, err
 		}
-		opts.Logf("diffing uncommitted changes in %s (git diff HEAD) ...", opts.RepoDir)
+		opts.Logf("reviewing uncommitted changes%s ...", inDir(opts.RepoDir))
 		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(headRef)...)
 		if err != nil {
 			return source.Result{}, fmt.Errorf("git diff HEAD: %w", err)
@@ -64,7 +65,7 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		}
 		branchRef = headRef
 		rangeText = opts.Commit + "^.." + opts.Commit
-		opts.Logf("diffing commit %s in %s ...", opts.Commit, opts.RepoDir)
+		opts.Logf("reviewing commit %s%s ...", opts.Commit, inDir(opts.RepoDir))
 		parent, root, parentErr := commitParent(ctx, opts.RepoDir, headRef, runner)
 		if parentErr != nil {
 			return source.Result{}, parentErr
@@ -95,14 +96,14 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		if err != nil {
 			return source.Result{}, err
 		}
-		opts.Logf("diffing %s...%s in %s ...", baseName, headName, opts.RepoDir)
+		opts.Logf("reviewing %s...%s%s ...", baseName, headName, inDir(opts.RepoDir))
 		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(baseRef+"..."+headRef)...)
 		if err != nil {
 			return source.Result{}, fmt.Errorf("git diff %s...%s: %w", baseName, headName, err)
 		}
 		rangeText = baseName + "..." + headName
 		if len(bytes.TrimSpace(diffBytes)) == 0 && opts.Head == "" {
-			opts.Logf("no committed changes vs %s; falling back to uncommitted changes (git diff HEAD)", baseName)
+			opts.Logf("branch is clean against %s - reviewing uncommitted changes instead", baseName)
 			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(headRef)...)
 			if err != nil {
 				return source.Result{}, fmt.Errorf("git diff HEAD: %w", err)
@@ -185,4 +186,13 @@ func DetectBase(ctx context.Context, repoDir string, runner gitexec.Runner) (str
 		}
 	}
 	return "", fmt.Errorf("could not auto-detect a base branch; pass --base <ref>")
+}
+
+// inDir renders " in <dir>" only when the repository is somewhere other
+// than where the user is standing — the path is noise otherwise.
+func inDir(repoDir string) string {
+	if cwd, err := os.Getwd(); err == nil && cwd == repoDir {
+		return ""
+	}
+	return " in " + repoDir
 }

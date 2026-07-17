@@ -27,7 +27,7 @@ case "$(uname -m)" in
 esac
 
 if [ -z "$version" ]; then
-  release_json=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest") || fail "could not resolve the latest release"
+  release_json=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest") || fail "no published release found for $repo yet - releases appear at https://github.com/$repo/releases, or build from source: go install github.com/$repo/cmd/bgr@latest"
   version=$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1)
   [ -n "$version" ] || fail "latest release did not include a tag_name"
 fi

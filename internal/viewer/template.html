@@ -172,8 +172,10 @@ body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.5 
 button { font: inherit; }
 
 /* ---------- rail ---------- */
-.app { display: grid; grid-template-columns: 316px minmax(0, 1fr); min-height: 100vh; }
+.app { display: grid; grid-template-columns: var(--rail-width, 316px) minmax(0, 1fr); min-height: 100vh; }
 .sidebar { position: sticky; top: 0; height: 100vh; overflow: auto; border-right: 1px solid var(--border-muted); background: var(--rail); padding: 20px 14px; }
+.rail-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 40; }
+.rail-resizer:hover, .rail-resizer.dragging { background: var(--accent-edge); }
 .brand { padding: 0 8px 14px; }
 .brand-name { font: 700 12px var(--mono); color: var(--accent); letter-spacing: .04em; }
 .brand-title { margin: 6px 0 4px; font-weight: 650; font-size: 14.5px; line-height: 1.4; letter-spacing: -.01em; overflow-wrap: anywhere; }
@@ -355,6 +357,7 @@ body[data-view="split"] .view-split { display: block; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) { {{.ChromaDark}} {{.ChromaDarkRules}} } }
 @media (max-width: 820px) {
   .app { display: block; }
+  .rail-resizer { display: none; }
   .sidebar { position: sticky; height: auto; max-height: 180px; z-index: 30; border-right: 0; border-bottom: 1px solid var(--border-muted); padding: 10px; }
   .brand, .progress-label { display: none; }
   .progress-track { margin: 0 4px 8px; }
@@ -378,6 +381,7 @@ body[data-view="split"] .view-split { display: block; }
 <body data-view="unified" data-docid="{{.DocID}}" data-total-files="{{.TotalFiles}}">
 <div class="app">
   <aside class="sidebar" aria-label="Walkthrough steps">
+    <div class="rail-resizer" id="rail-resizer" title="Drag to resize the sidebar - double-click to reset" aria-hidden="true"></div>
     <div class="brand">
       <div class="brand-name">bgr review</div>
       <div class="brand-title">{{.Title}}</div>
@@ -682,6 +686,45 @@ document.addEventListener("DOMContentLoaded", function () {
       if (node) go(Number(node.getAttribute("data-step-target")));
     }
   });
+
+  var railKey = "bgr:rail-width";
+  var railDefault = 316;
+  function setRail(px) {
+    document.documentElement.style.setProperty("--rail-width", px + "px");
+  }
+  try {
+    var savedRail = parseInt(localStorage.getItem(railKey), 10);
+    if (savedRail >= 220 && savedRail <= 560) setRail(savedRail);
+  } catch (_) {}
+  var resizer = document.getElementById("rail-resizer");
+  if (resizer) {
+    var railDragging = false;
+    var railCurrent = railDefault;
+    resizer.addEventListener("pointerdown", function (event) {
+      railDragging = true;
+      resizer.classList.add("dragging");
+      resizer.setPointerCapture(event.pointerId);
+      document.body.style.userSelect = "none";
+    });
+    resizer.addEventListener("pointermove", function (event) {
+      if (!railDragging) return;
+      railCurrent = Math.min(560, Math.max(220, Math.round(event.clientX)));
+      setRail(railCurrent);
+    });
+    function endRailDrag() {
+      if (!railDragging) return;
+      railDragging = false;
+      resizer.classList.remove("dragging");
+      document.body.style.userSelect = "";
+      try { localStorage.setItem(railKey, String(railCurrent)); } catch (_) {}
+    }
+    resizer.addEventListener("pointerup", endRailDrag);
+    resizer.addEventListener("pointercancel", endRailDrag);
+    resizer.addEventListener("dblclick", function () {
+      setRail(railDefault);
+      try { localStorage.removeItem(railKey); } catch (_) {}
+    });
+  }
 
   setView(storedView);
   applyThemeButtons();
