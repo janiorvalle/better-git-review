@@ -19,10 +19,18 @@ func TestChangedSpans(t *testing.T) {
 	}{
 		{"empty", "", "", Span{}, Span{}, false},
 		{"identical", "same", "same", Span{}, Span{}, false},
-		{"fully different", "old", "new", Span{0, 3}, Span{0, 3}, true},
+		// Below the similarity gate: rewrites get no misleading marks.
+		{"fully different", "old", "new", Span{}, Span{}, false},
 		{"common edges", "hello old world", "hello new world", Span{6, 9}, Span{6, 9}, true},
-		{"utf8", "café", "caff", Span{3, 4}, Span{3, 4}, true},
+		// Token snapping widens the mark to the whole identifier.
+		{"utf8", "café", "caff", Span{0, 4}, Span{0, 4}, true},
 		{"whitespace", "a b", "a  b", Span{2, 2}, Span{2, 3}, true},
+		// The mark covers the whole identifier, never the bare "s"/"g".
+		{"token snap", "foo.setValue(1)", "foo.getValue(1)", Span{4, 12}, Span{4, 12}, true},
+		// Positional pairing of unrelated lines (owner screenshot): the
+		// accidental ".an" prefix must not produce mid-word marks.
+		{"rewrite gated", ".anyRequest()", `.antMatchers("/testEngine").permitAll() // Allow unauthenticated`, Span{}, Span{}, false},
+		{"rewrite gated 2", ".authenticated()", ".anyRequest().authenticated() // Require authentication", Span{}, Span{}, false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -178,5 +186,13 @@ func TestChromaThemeUsesCompleteVariablePaletteWithoutBackgrounds(t *testing.T) 
 	}
 	if !strings.Contains(string(theme.DarkRules), ".chroma .c { font-style: italic; }") {
 		t.Fatal("dark comment typography is missing from the dark theme")
+	}
+}
+
+func TestChangedSpansIgnoresSharedIndentation(t *testing.T) {
+	oldText := "                .anyRequest()"
+	newText := `                .antMatchers("/testEngine").permitAll() // Allow unauthenticated`
+	if _, _, changed := ChangedSpans(oldText, newText); changed {
+		t.Fatal("shared indentation must not defeat the similarity gate")
 	}
 }

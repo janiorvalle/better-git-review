@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
@@ -59,6 +60,12 @@ type linePair struct {
 	newSpan *Span
 }
 
+// changedSpanMinSimilarity gates intra-line marks: when the common prefix
+// and suffix cover less than this share of the shorter line, the pair is a
+// rewrite rather than an edit, and marks would only mislead (GitHub skips
+// them in the same situation).
+const changedSpanMinSimilarity = 0.5
+
 func ChangedSpans(oldText, newText string) (Span, Span, bool) {
 	oldRunes := []rune(oldText)
 	newRunes := []rune(newText)
@@ -74,8 +81,54 @@ func ChangedSpans(oldText, newText string) (Span, Span, bool) {
 		oldRunes[len(oldRunes)-1-suffix] == newRunes[len(newRunes)-1-suffix] {
 		suffix++
 	}
+
+	// Similarity is measured over non-whitespace content: shared
+	// indentation must not make unrelated lines look like edits of each
+	// other. (Whitespace-only lines are trivially similar.)
+	commonContent := countNonSpace(oldRunes[:prefix]) + countNonSpace(oldRunes[len(oldRunes)-suffix:])
+	shorterContent := min(countNonSpace(oldRunes), countNonSpace(newRunes))
+	if shorterContent > 0 && float64(commonContent)/float64(shorterContent) < changedSpanMinSimilarity {
+		return Span{}, Span{}, false
+	}
+
+	// Snap mark boundaries outward to token edges so marks never start or
+	// end mid-identifier (".an|yRequest" reads as noise; ".anyRequest()"
+	// reads as a change). The prefix/suffix regions are identical across
+	// both lines, so widening keeps the spans aligned.
+	for prefix > 0 && isWordRune(oldRunes[prefix-1]) &&
+		((prefix < len(oldRunes) && isWordRune(oldRunes[prefix])) ||
+			(prefix < len(newRunes) && isWordRune(newRunes[prefix]))) {
+		prefix--
+	}
+	for suffix > 0 {
+		suffixStart := oldRunes[len(oldRunes)-suffix]
+		lastOld := len(oldRunes) - suffix - 1
+		lastNew := len(newRunes) - suffix - 1
+		touchesWord := (lastOld >= prefix && lastOld >= 0 && isWordRune(oldRunes[lastOld])) ||
+			(lastNew >= prefix && lastNew >= 0 && isWordRune(newRunes[lastNew]))
+		if isWordRune(suffixStart) && touchesWord {
+			suffix--
+			continue
+		}
+		break
+	}
+
 	return Span{Start: prefix, End: len(oldRunes) - suffix},
 		Span{Start: prefix, End: len(newRunes) - suffix}, true
+}
+
+func isWordRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func countNonSpace(runes []rune) int {
+	count := 0
+	for _, r := range runes {
+		if !unicode.IsSpace(r) {
+			count++
+		}
+	}
+	return count
 }
 
 func BuildRows(file document.File, fileIndex int) ([]UnifiedRow, []SplitRow) {
@@ -325,7 +378,9 @@ func newHighlighter(path string) *syntaxHighlighter {
 }
 
 func (h *syntaxHighlighter) highlight(text string, span *Span) template.HTML {
-	if span == nil {
+	if span == nil || span.Start >= span.End {
+		// No span, or an empty span (pure insertion/deletion on the other
+		// side) — an empty <mark> adds nothing but DOM noise.
 		return template.HTML(h.highlightPart(text))
 	}
 	runes := []rune(text)
