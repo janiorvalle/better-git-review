@@ -539,6 +539,7 @@ body[data-view="split"] .view-split { display: block; }
 {{range .FidelityFiles}}<template id="fidelity-{{.Index}}">{{.HTML}}</template>{{end}}
 <script id="walkthrough-data" type="application/json">{{.JSON}}</script>
 <script id="diff-data" type="application/json">{{.DiffJSON}}</script>
+<script id="viewer-config" type="application/json">{{.ViewerConfig}}</script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   var steps = Array.from(document.querySelectorAll(".step"));
@@ -546,8 +547,10 @@ document.addEventListener("DOMContentLoaded", function () {
   var current = 0;
   var viewerDocument = { files: [], analysis: { cohorts: [], stubbedFiles: [], mechanicalFiles: [], fileKeySymbols: [], stubbedCohorts: [] } };
   var diffPayload = { f: [], u: [] };
+  var viewerConfig = {};
   try { viewerDocument = JSON.parse(document.getElementById("walkthrough-data").textContent || '{}'); } catch (_) {}
   try { diffPayload = JSON.parse(document.getElementById("diff-data").textContent || '{"f":[],"u":[]}'); } catch (_) {}
+  try { viewerConfig = JSON.parse(document.getElementById("viewer-config").textContent || '{}'); } catch (_) {}
   var fileDetails = [];
   (viewerDocument.analysis.cohorts || []).forEach(function (cohort) {
     var indexes = cohort.files || [];
@@ -709,7 +712,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var details = fileDetails[fileIndex] || { summary: "", position: 1, total: 1, prev: -1, next: -1 };
     var uiData = diffPayload.u[fileIndex] || ["TXT", "Binary file", null, null];
     var card = makeElement("article", "file");
-    if ((fileData.additions || 0) + (fileData.deletions || 0) > 400) card.classList.add("collapsed");
+    if ((fileData.additions || 0) + (fileData.deletions || 0) > viewerConfig.collapseThreshold) card.classList.add("collapsed");
     card.dataset.file = String(fileIndex);
     card.id = "file-" + fileIndex;
     var header = makeElement("header", "file-header");
@@ -736,7 +739,7 @@ document.addEventListener("DOMContentLoaded", function () {
     header.appendChild(viewedButton);
     card.appendChild(header);
     if (details.summary) card.appendChild(makeElement("div", "file-summary", details.summary));
-    var symbols = (fileKeySymbols[fileIndex] || []).slice(0, 5);
+    var symbols = (fileKeySymbols[fileIndex] || []).slice(0, viewerConfig.keySymbolCap);
     if (symbols.length) {
       var symbolList = makeElement("div", "symbol-list");
       symbols.forEach(function (symbol) { symbolList.appendChild(makeElement("span", "symbol-chip", symbol)); });
@@ -851,9 +854,9 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         var end = start;
         while (end < lines.length && lines[end][0] === "c") end++;
-        if (end - start > 10) {
-          var foldStart = start + 3;
-          var foldEnd = end - 3;
+        if (end - start > viewerConfig.foldThreshold) {
+          var foldStart = start + viewerConfig.foldContext;
+          var foldEnd = end - viewerConfig.foldContext;
           foldStarts.set(foldStart, foldEnd - foldStart);
           for (var hiddenIndex = foldStart; hiddenIndex < foldEnd; hiddenIndex++) hidden.add(hiddenIndex);
         }

@@ -13,15 +13,18 @@ import (
 )
 
 type Options struct {
-	PR       string
-	DiffFile string
-	Base     string
-	Head     string
-	Commit   string
-	Dirty    bool
-	RepoDir  string
-	Stdin    io.Reader
-	Logf     func(string, ...any)
+	PR                   string
+	DiffFile             string
+	Base                 string
+	Head                 string
+	Commit               string
+	Dirty                bool
+	RepoDir              string
+	Stdin                io.Reader
+	Logf                 func(string, ...any)
+	GitContextLines      int
+	GitFindRenames       int
+	GitHubPRDiffMaxFiles int
 }
 
 type Result struct {

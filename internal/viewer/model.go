@@ -19,6 +19,26 @@ import (
 
 const FidelityBudgetChars = 4_000_000
 
+type Settings struct {
+	CollapseThreshold     int
+	FoldThreshold         int
+	FoldContext           int
+	LongLineThreshold     int
+	KeySymbolCap          int
+	WordDiffMinSimilarity float64
+	ThemeLight            string
+	ThemeDark             string
+	FidelityBudget        int
+}
+
+func DefaultSettings() Settings {
+	return Settings{
+		CollapseThreshold: 400, FoldThreshold: 10, FoldContext: 3,
+		LongLineThreshold: 4_096, KeySymbolCap: 5, WordDiffMinSimilarity: 0.5,
+		ThemeLight: "github", ThemeDark: "github-dark", FidelityBudget: FidelityBudgetChars,
+	}
+}
+
 type Page struct {
 	Title            string
 	Range            string
@@ -42,6 +62,7 @@ type Page struct {
 	Steps            []StepView
 	Files            []FileView
 	FidelityFiles    []FidelityFileView
+	ViewerConfig     template.JS
 }
 
 type FidelityFileView struct {
@@ -109,10 +130,14 @@ type ImageAssetView struct {
 }
 
 func buildPage(doc document.Document) (Page, error) {
-	return buildPageWithPreviews(doc, nil)
+	return buildPageWithPreviewsAndSettings(doc, nil, DefaultSettings())
 }
 
 func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview) (Page, error) {
+	return buildPageWithPreviewsAndSettings(doc, previews, DefaultSettings())
+}
+
+func buildPageWithPreviewsAndSettings(doc document.Document, previews map[int]media.Preview, settings Settings) (Page, error) {
 	metadata := doc
 	metadata.Files = append([]document.File(nil), doc.Files...)
 	for index := range metadata.Files {
@@ -123,7 +148,14 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 		return Page{}, err
 	}
 	jsonIsland := strings.ReplaceAll(string(encoded), "<", `\u003c`)
-	chromaTheme, err := ChromaThemeCSS("github", "github-dark")
+	chromaTheme, err := ChromaThemeCSS(settings.ThemeLight, settings.ThemeDark)
+	if err != nil {
+		return Page{}, fmt.Errorf("viewer.theme_light/viewer.theme_dark: %w", err)
+	}
+	viewerConfig, err := json.Marshal(map[string]int{
+		"foldThreshold": settings.FoldThreshold, "foldContext": settings.FoldContext,
+		"collapseThreshold": settings.CollapseThreshold, "keySymbolCap": settings.KeySymbolCap,
+	})
 	if err != nil {
 		return Page{}, err
 	}
@@ -142,6 +174,7 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 		DocID:            docID(doc),
 		Overview:         doc.Analysis.Overview,
 		Files:            make([]FileView, len(doc.Files)),
+		ViewerConfig:     template.JS(viewerConfig),
 	}
 	stubbedFiles := make(map[int]bool, len(doc.Analysis.StubbedFiles))
 	for _, fileIndex := range doc.Analysis.StubbedFiles {
@@ -154,8 +187,8 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 	page.MechanicalCount = len(mechanicalFiles)
 	fullFidelity := map[int]string{}
 	if doc.Meta.Staged {
-		fidelityBudget := min(FidelityBudgetChars, stagedFidelityCeilingBudget(doc.Files, len(encoded)))
-		fullFidelity, err = planFullFidelity(doc.Files, mechanicalFiles, fidelityBudget)
+		fidelityBudget := min(settings.FidelityBudget, stagedFidelityCeilingBudget(doc.Files, len(encoded)))
+		fullFidelity, err = planFullFidelityWithSettings(doc.Files, mechanicalFiles, fidelityBudget, settings)
 		if err != nil {
 			return Page{}, err
 		}
@@ -164,7 +197,7 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 		var unified []UnifiedRow
 		clientRows := doc.Meta.Staged && !file.Binary && fullFidelity[index] == ""
 		if !doc.Meta.Staged && !clientRows {
-			unified = BuildRows(file, index)
+			unified = BuildRowsWithSettings(file, index, settings)
 		}
 		page.Additions += file.Additions
 		page.Deletions += file.Deletions
@@ -183,8 +216,8 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 			Binary:           file.Binary,
 			Stubbed:          stubbedFiles[index],
 			Mechanical:       mechanicalFiles[index],
-			KeySymbols:       cappedSymbols(doc.Analysis.FileKeySymbols, index),
-			Collapsed:        file.Additions+file.Deletions > 400,
+			KeySymbols:       cappedSymbols(doc.Analysis.FileKeySymbols, index, settings.KeySymbolCap),
+			Collapsed:        file.Additions+file.Deletions > settings.CollapseThreshold,
 			ClientRows:       clientRows,
 			PrevFile:         -1,
 			NextFile:         -1,
@@ -208,7 +241,7 @@ func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview
 	}
 	diffIsland := `{"f":[],"u":[]}`
 	if doc.Meta.Staged {
-		diffIsland, err = compactDiffJSON(doc.Files, page.Files)
+		diffIsland, err = compactDiffJSONWithSettings(doc.Files, page.Files, settings)
 		if err != nil {
 			return Page{}, err
 		}
@@ -284,11 +317,11 @@ func stagedFidelityCeilingBudget(files []document.File, metadataChars int) int {
 	return max(ceiling-metadataChars-viewerShellReserve-diffChars*2, 0)
 }
 
-func cappedSymbols(all [][]string, index int) []string {
+func cappedSymbols(all [][]string, index, cap int) []string {
 	if index < 0 || index >= len(all) {
 		return nil
 	}
-	return append([]string(nil), all[index][:min(len(all[index]), 5)]...)
+	return append([]string(nil), all[index][:min(len(all[index]), cap)]...)
 }
 
 func containsIndex(indexes []int, target int) bool {
@@ -307,6 +340,10 @@ type fidelityCandidate struct {
 }
 
 func planFullFidelity(files []document.File, mechanical map[int]bool, budget int) (map[int]string, error) {
+	return planFullFidelityWithSettings(files, mechanical, budget, DefaultSettings())
+}
+
+func planFullFidelityWithSettings(files []document.File, mechanical map[int]bool, budget int, settings Settings) (map[int]string, error) {
 	if budget <= 0 {
 		return map[int]string{}, nil
 	}
@@ -344,7 +381,7 @@ func planFullFidelity(files []document.File, mechanical map[int]bool, budget int
 				if err := unifiedRowsTemplate.Execute(&output, struct {
 					Path string
 					Rows []UnifiedRow
-				}{file.Path, BuildRows(file, index)}); err != nil {
+				}{file.Path, BuildRowsWithSettings(file, index, settings)}); err != nil {
 					errOnce.Do(func() { firstErr = err })
 					continue
 				}
@@ -391,7 +428,7 @@ func planFullFidelity(files []document.File, mechanical map[int]bool, budget int
 				if err := unifiedRowsTemplate.Execute(&output, struct {
 					Path string
 					Rows []UnifiedRow
-				}{file.Path, BuildRows(file, candidate.index)}); err != nil {
+				}{file.Path, BuildRowsWithSettings(file, candidate.index, settings)}); err != nil {
 					errOnce.Do(func() { firstErr = err })
 					continue
 				}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/janiorvalle/better-git-review/internal/provider"
 )
@@ -16,17 +17,24 @@ func (Adapter) Name() string {
 }
 
 func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, string, []string, error) {
+	if opts.ProviderExecTimeoutSeconds <= 0 {
+		opts.ProviderExecTimeoutSeconds = 600
+	}
 	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "gpt-5.6-luna")
 	reasoning := provider.ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "low")
 	if err := provider.ValidateReasoning("codex-cli", reasoning, codexReasoningLevels(model)...); err != nil {
 		return nil, "", "", nil, err
 	}
-	return &CLI{Model: model, Reasoning: reasoning}, model, reasoning, nil, nil
+	return &CLI{
+		Model: model, Reasoning: reasoning,
+		ExecTimeout: time.Duration(opts.ProviderExecTimeoutSeconds) * time.Second,
+	}, model, reasoning, nil, nil
 }
 
 type CLI struct {
-	Model     string
-	Reasoning string
+	Model       string
+	Reasoning   string
+	ExecTimeout time.Duration
 }
 
 func (p *CLI) Name() string { return "codex-cli" }
@@ -87,7 +95,7 @@ func (p *CLI) Complete(ctx context.Context, prompt string) (string, error) {
 	defer os.Remove(outputPath)
 
 	args := p.args(isolatedDir, outputPath)
-	if _, err := provider.RunCommand(ctx, isolatedDir, []byte(prompt), "codex", args...); err != nil {
+	if _, err := provider.RunCommandTimeout(ctx, p.ExecTimeout, isolatedDir, []byte(prompt), "codex", args...); err != nil {
 		return "", err
 	}
 	output, err := os.ReadFile(outputPath)

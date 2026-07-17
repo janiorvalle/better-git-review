@@ -65,12 +65,13 @@ type CommandRunner interface {
 }
 
 type Options struct {
-	RepoDir  string
-	Query    string
-	Input    io.Reader
-	Output   io.Writer
-	Git      gitexec.Runner
-	Commands CommandRunner
+	RepoDir   string
+	Query     string
+	Input     io.Reader
+	Output    io.Writer
+	Git       gitexec.Runner
+	Commands  CommandRunner
+	ListLimit int
 }
 
 func Run(ctx context.Context, opts Options) (Selection, error) {
@@ -80,7 +81,7 @@ func Run(ctx context.Context, opts Options) (Selection, error) {
 	if opts.Output == nil {
 		opts.Output = io.Discard
 	}
-	catalog, err := Discover(ctx, opts.RepoDir, opts.Git, opts.Commands)
+	catalog, err := DiscoverWithLimit(ctx, opts.RepoDir, opts.Git, opts.Commands, opts.ListLimit)
 	if err != nil {
 		return Selection{}, err
 	}
@@ -114,6 +115,13 @@ func Run(ctx context.Context, opts Options) (Selection, error) {
 }
 
 func Discover(ctx context.Context, repoDir string, gitRunner gitexec.Runner, commands CommandRunner) (Catalog, error) {
+	return DiscoverWithLimit(ctx, repoDir, gitRunner, commands, 1000)
+}
+
+func DiscoverWithLimit(ctx context.Context, repoDir string, gitRunner gitexec.Runner, commands CommandRunner, listLimit int) (Catalog, error) {
+	if listLimit == 0 {
+		listLimit = 1000
+	}
 	if gitRunner == nil {
 		gitRunner = gitexec.ExecRunner{}
 	}
@@ -128,13 +136,13 @@ func Discover(ctx context.Context, repoDir string, gitRunner gitexec.Runner, com
 			Command: "bgr --dirty",
 		}}
 	}
-	result.PRs, result.Notes = discoverPRs(ctx, repoDir, commands)
+	result.PRs, result.Notes = discoverPRsWithLimit(ctx, repoDir, commands, listLimit)
 	if err == nil {
 		result.Branches = discoverBranches(ctx, repoDir, base, gitRunner)
 	} else {
 		result.Notes = append(result.Notes, "Branches unavailable: pass --base to review a branch by ref.")
 	}
-	result.Commits = discoverCommits(ctx, repoDir, gitRunner)
+	result.Commits = discoverCommitsWithLimit(ctx, repoDir, gitRunner, listLimit)
 	return result, nil
 }
 
@@ -224,13 +232,17 @@ func mapSelection(item Item) Selection {
 }
 
 func discoverPRs(ctx context.Context, repoDir string, runner CommandRunner) ([]Item, []string) {
+	return discoverPRsWithLimit(ctx, repoDir, runner, 1000)
+}
+
+func discoverPRsWithLimit(ctx context.Context, repoDir string, runner CommandRunner, listLimit int) ([]Item, []string) {
 	if _, err := runner.LookPath("gh"); err != nil {
 		return nil, []string{"GitHub PRs unavailable: install and authenticate gh to include them."}
 	}
 	if _, err := runner.Run(ctx, repoDir, "gh", "auth", "status", "--active"); err != nil {
 		return nil, []string{"GitHub PRs unavailable: run `gh auth login` to include them."}
 	}
-	data, err := runner.Run(ctx, repoDir, "gh", "pr", "list", "--state", "open", "--limit", "1000", "--json", "number,title,updatedAt")
+	data, err := runner.Run(ctx, repoDir, "gh", "pr", "list", "--state", "open", "--limit", strconv.Itoa(listLimit), "--json", "number,title,updatedAt")
 	if err != nil {
 		return nil, []string{"GitHub PRs unavailable: `gh pr list` failed."}
 	}
@@ -285,7 +297,11 @@ func discoverBranches(ctx context.Context, repoDir, base string, runner gitexec.
 }
 
 func discoverCommits(ctx context.Context, repoDir string, runner gitexec.Runner) []Item {
-	data, err := runner.Run(ctx, repoDir, "log", "-n", "1000", "--format=%H%x09%h%x09%ct%x09%s", "HEAD")
+	return discoverCommitsWithLimit(ctx, repoDir, runner, 1000)
+}
+
+func discoverCommitsWithLimit(ctx context.Context, repoDir string, runner gitexec.Runner, listLimit int) []Item {
+	data, err := runner.Run(ctx, repoDir, "log", "-n", strconv.Itoa(listLimit), "--format=%H%x09%h%x09%ct%x09%s", "HEAD")
 	if err != nil {
 		return nil
 	}

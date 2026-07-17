@@ -41,7 +41,11 @@ func Harden(args ...string) []string {
 }
 
 func DiffArgs(target string) []string {
-	return []string{
+	return DiffArgsWithOptions(target, 0, 0)
+}
+
+func DiffArgsWithOptions(target string, contextLines, findRenames int) []string {
+	args := []string{
 		"-c", "diff.mnemonicPrefix=false",
 		"diff",
 		"--no-ext-diff",
@@ -49,12 +53,22 @@ func DiffArgs(target string) []string {
 		"--no-color",
 		"--src-prefix=a/",
 		"--dst-prefix=b/",
-		target,
 	}
+	if contextLines > 0 {
+		args = append(args, fmt.Sprintf("-U%d", contextLines))
+	}
+	if findRenames > 0 {
+		args = append(args, fmt.Sprintf("-M%d%%", findRenames))
+	}
+	return append(args, target)
 }
 
 func RootDiffArgs(commit string) []string {
-	return []string{
+	return RootDiffArgsWithOptions(commit, 0, 0)
+}
+
+func RootDiffArgsWithOptions(commit string, contextLines, findRenames int) []string {
+	args := []string{
 		"-c", "diff.mnemonicPrefix=false",
 		"diff-tree",
 		"--root",
@@ -65,8 +79,14 @@ func RootDiffArgs(commit string) []string {
 		"--no-color",
 		"--src-prefix=a/",
 		"--dst-prefix=b/",
-		commit,
 	}
+	if contextLines > 0 {
+		args = append(args, fmt.Sprintf("-U%d", contextLines))
+	}
+	if findRenames > 0 {
+		args = append(args, fmt.Sprintf("-M%d%%", findRenames))
+	}
+	return append(args, commit)
 }
 
 func BlameArgs(ref, lineRange, path string) []string {

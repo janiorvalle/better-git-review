@@ -20,30 +20,40 @@ func (Adapter) Name() string {
 }
 
 func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, string, []string, error) {
+	if opts.CatalogTimeoutSeconds <= 0 {
+		opts.CatalogTimeoutSeconds = 10
+	}
+	if opts.CompletionTimeoutSeconds <= 0 {
+		opts.CompletionTimeoutSeconds = 300
+	}
 	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "z-ai/glm-5.2")
 	reasoning := provider.ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "")
 	if err := provider.ValidateReasoning("openrouter", reasoning, openRouterReasoningLevels(model)...); err != nil {
 		return nil, "", "", nil, err
 	}
 	return &Client{
-		Model:     model,
-		Reasoning: reasoning,
-		APIKeyEnv: provider.DefaultString(opts.APIKeyEnv, "OPENROUTER_API_KEY"),
-		BaseURL:   provider.DefaultString(opts.BaseURL, "https://openrouter.ai/api/v1"),
-		Getenv:    opts.Getenv,
+		Model:             model,
+		Reasoning:         reasoning,
+		APIKeyEnv:         provider.DefaultString(opts.APIKeyEnv, "OPENROUTER_API_KEY"),
+		BaseURL:           provider.DefaultString(opts.BaseURL, "https://openrouter.ai/api/v1"),
+		Getenv:            opts.Getenv,
+		CatalogTimeout:    time.Duration(opts.CatalogTimeoutSeconds) * time.Second,
+		CompletionTimeout: time.Duration(opts.CompletionTimeoutSeconds) * time.Second,
 	}, model, reasoning, nil, nil
 }
 
 type Client struct {
-	Model            string
-	Reasoning        string
-	APIKeyEnv        string
-	BaseURL          string
-	Getenv           func(string) string
-	HTTPClient       *http.Client
-	reasoningByModel map[string][]string
-	contextByModel   map[string]int
-	catalogLoaded    bool
+	Model             string
+	Reasoning         string
+	APIKeyEnv         string
+	BaseURL           string
+	Getenv            func(string) string
+	HTTPClient        *http.Client
+	CatalogTimeout    time.Duration
+	CompletionTimeout time.Duration
+	reasoningByModel  map[string][]string
+	contextByModel    map[string]int
+	catalogLoaded     bool
 }
 
 func (p *Client) Name() string { return "openrouter" }
@@ -54,7 +64,7 @@ func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
 	p.contextByModel = nil
 	client := p.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{Timeout: p.CatalogTimeout}
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(p.BaseURL, "/")+"/models", nil)
 	if err != nil {
@@ -248,7 +258,7 @@ func (p *Client) complete(ctx context.Context, prompt string, schema json.RawMes
 	request.Header.Set("Content-Type", "application/json")
 	client := p.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Minute}
+		client = &http.Client{Timeout: p.CompletionTimeout}
 	}
 	response, err := client.Do(request)
 	if err != nil {

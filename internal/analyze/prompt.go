@@ -74,6 +74,10 @@ func AnalysisInputBytes(files []document.File) int {
 }
 
 func BuildPrompt(source document.Source, files []document.File, budget int, delimiters Delimiters) string {
+	return BuildPromptWithSettings(source, files, budget, delimiters, DefaultSettings())
+}
+
+func BuildPromptWithSettings(source document.Source, files []document.File, budget int, delimiters Delimiters, settings Settings) string {
 	if budget <= 0 {
 		budget = DefaultStageBudget
 	}
@@ -85,7 +89,7 @@ func BuildPrompt(source document.Source, files []document.File, budget int, deli
 	}
 	bodyBudget := max(budget-headerBytes, 0)
 	perFileCap := bodyBudget / max(len(files), 1)
-	perFileCap = min(perFileCap, maxFileDiffCap)
+	perFileCap = min(perFileCap, settings.FileDiffCap)
 
 	var content strings.Builder
 	fmt.Fprintf(&content, "CHANGE_TITLE_JSON: %s\n", jsonString(source.Title))
@@ -175,7 +179,18 @@ func BuildSynthesisPrompt(
 	budget int,
 	delimiters Delimiters,
 ) string {
-	capChars := min(max(budget-synthesisPromptOverheadChars(delimiters), 0), DigestMaxChars)
+	return BuildSynthesisPromptWithSettings(source, cohorts, narrations, budget, delimiters, DefaultSettings())
+}
+
+func BuildSynthesisPromptWithSettings(
+	source document.Source,
+	cohorts []PlannedCohort,
+	narrations []CohortNarration,
+	budget int,
+	delimiters Delimiters,
+	settings Settings,
+) string {
+	capChars := min(max(budget-synthesisPromptOverheadChars(delimiters), 0), settings.DigestMaxChars)
 	var content strings.Builder
 	fmt.Fprintf(&content, "CHANGE_TITLE_JSON: %s\nDESCRIPTION_JSON: %s\nCOHORTS: %d\n",
 		jsonString(source.Title), jsonString(promptDescription(source.Description)), len(cohorts))

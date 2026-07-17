@@ -53,9 +53,9 @@ func TestRenderEscapesHostileData(t *testing.T) {
 	if strings.Contains(html, `<img src=x onerror`) {
 		t.Fatal("hostile image tag reached HTML unescaped")
 	}
-	// Four scripts: the head theme-stamper, metadata island, compact diff
-	// island, and the viewer.
-	if strings.Count(html, "<script") != 4 {
+	// Five scripts: the head theme-stamper, metadata/config/compact-diff
+	// islands, and the viewer.
+	if strings.Count(html, "<script") != 5 {
 		t.Fatalf("unexpected script tags in output: %d", strings.Count(html, "<script"))
 	}
 	if strings.Contains(html, "mermaid") {
@@ -68,6 +68,40 @@ func TestRenderEscapesHostileData(t *testing.T) {
 	}
 	if decoded.Files[0].Path != hostile {
 		t.Fatalf("JSON island did not preserve hostile text: %q", decoded.Files[0].Path)
+	}
+}
+
+func TestRenderInjectsViewerThresholdsWithoutJSLiterals(t *testing.T) {
+	doc := document.Document{
+		SchemaVersion: document.SchemaVersion,
+		Source:        document.Source{Title: "Config test", Name: "config-test"},
+		Analysis: document.Analysis{
+			Title: "Config test", Overview: "Config test", Cohorts: []document.Cohort{},
+			StubbedFiles: []int{}, MechanicalFiles: []int{}, FileKeySymbols: [][]string{},
+		},
+	}
+	settings := DefaultSettings()
+	settings.CollapseThreshold = 17
+	settings.FoldThreshold = 23
+	settings.FoldContext = 4
+	settings.KeySymbolCap = 9
+	output, err := RenderWithSettings(doc, settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(output)
+	for _, expected := range []string{
+		`"collapseThreshold":17`, `"foldThreshold":23`,
+		`"foldContext":4`, `"keySymbolCap":9`,
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("artifact missing injected setting %s", expected)
+		}
+	}
+	for _, forbidden := range []string{"> 400)", "> 10)", "start + 3", ".slice(0, 5)"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("artifact retains duplicated JS literal %q", forbidden)
+		}
 	}
 }
 

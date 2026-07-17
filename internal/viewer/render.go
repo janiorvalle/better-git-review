@@ -17,19 +17,31 @@ var templateSource string
 var viewerTemplate = template.Must(template.New("viewer").Parse(templateSource))
 
 func Render(doc document.Document) ([]byte, error) {
-	return RenderWithPreviews(doc, nil)
+	return RenderWithSettings(doc, DefaultSettings())
+}
+
+func RenderWithSettings(doc document.Document, settings Settings) ([]byte, error) {
+	return RenderWithPreviewsAndSettings(doc, nil, settings)
 }
 
 func RenderWithPreviews(doc document.Document, previews map[int]media.Preview) ([]byte, error) {
+	return RenderWithPreviewsAndSettings(doc, previews, DefaultSettings())
+}
+
+func RenderWithPreviewsAndSettings(doc document.Document, previews map[int]media.Preview, settings Settings) ([]byte, error) {
 	var output bytes.Buffer
-	if err := RenderToWithPreviews(&output, doc, previews); err != nil {
+	if err := RenderToWithPreviewsAndSettings(&output, doc, previews, settings); err != nil {
 		return nil, err
 	}
 	return output.Bytes(), nil
 }
 
 func RenderToWithPreviews(output io.Writer, doc document.Document, previews map[int]media.Preview) error {
-	page, err := buildPageWithPreviews(doc, previews)
+	return RenderToWithPreviewsAndSettings(output, doc, previews, DefaultSettings())
+}
+
+func RenderToWithPreviewsAndSettings(output io.Writer, doc document.Document, previews map[int]media.Preview, settings Settings) error {
+	page, err := buildPageWithPreviewsAndSettings(doc, previews, settings)
 	if err != nil {
 		return err
 	}

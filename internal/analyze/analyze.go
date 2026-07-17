@@ -30,6 +30,7 @@ type Options struct {
 	Random   io.Reader
 	Progress func(completed, total int)
 	Plan     *StagedPlan
+	Settings Settings
 }
 
 type FileSummary struct {
@@ -96,6 +97,9 @@ var SynthesisSchema = json.RawMessage(`{
 }`)
 
 func Run(ctx context.Context, opts Options) (document.Analysis, error) {
+	if opts.Settings.SummaryBatchMaxFiles == 0 {
+		opts.Settings = DefaultSettings()
+	}
 	if opts.Logf == nil {
 		opts.Logf = func(string, ...any) {}
 	}
@@ -112,7 +116,7 @@ func Run(ctx context.Context, opts Options) (document.Analysis, error) {
 	if opts.Staged {
 		return runStaged(ctx, opts, delimiters, logf)
 	}
-	prompt := BuildPrompt(opts.Source, opts.Files, opts.Budget, delimiters)
+	prompt := BuildPromptWithSettings(opts.Source, opts.Files, opts.Budget, delimiters, opts.Settings)
 	analysis, raw, validationErrors, err := runGauntlet(
 		ctx,
 		opts.Provider,
@@ -142,11 +146,11 @@ func runStaged(
 ) (document.Analysis, error) {
 	plan := opts.Plan
 	if plan == nil {
-		value := PlanStaged(opts.Files, nil, false, opts.Budget)
+		value := PlanStagedWithSettings(opts.Files, nil, false, opts.Budget, opts.Settings)
 		plan = &value
 	}
 	logf("summarizing %d review-worthy files in %d batches, up to %d batches at a time",
-		len(plan.Triage.ReviewWorthy), len(plan.SummaryBatches), StageConcurrency)
+		len(plan.Triage.ReviewWorthy), len(plan.SummaryBatches), opts.Settings.StageConcurrency)
 	summaries := make([]FileSummary, len(opts.Files))
 	for _, index := range plan.Triage.Mechanical {
 		summaries[index] = mechanicalSummary(opts.Files[index], plan.Triage.MechanicalWhy[index])
@@ -156,7 +160,7 @@ func runStaged(
 	var workers sync.WaitGroup
 	var progressMu sync.Mutex
 	var completed int
-	workerCount := min(StageConcurrency, len(plan.SummaryBatches))
+	workerCount := min(opts.Settings.StageConcurrency, len(plan.SummaryBatches))
 	for range workerCount {
 		workers.Add(1)
 		go func() {
@@ -219,12 +223,13 @@ func runStaged(
 	narrations := make([]CohortNarration, len(plan.Cohorts))
 	stubbedCohorts := []int{}
 	for cohortIndex, cohort := range plan.Cohorts {
-		digest := BuildCohortDigest(
+		digest := BuildCohortDigestWithSettings(
 			opts.Files,
 			cohort,
 			plan.Triage,
 			summaries,
 			cohortDigestBudget(opts.Budget, cohort, delimiters),
+			opts.Settings,
 		)
 		prompt := BuildCohortNarrationPrompt(cohort, digest, delimiters)
 		narration, _, _, err := runStageAttempts(
@@ -248,7 +253,7 @@ func runStaged(
 		narrations[cohortIndex] = narration
 	}
 
-	synthesisPrompt := BuildSynthesisPrompt(opts.Source, plan.Cohorts, narrations, opts.Budget, delimiters)
+	synthesisPrompt := BuildSynthesisPromptWithSettings(opts.Source, plan.Cohorts, narrations, opts.Budget, delimiters, opts.Settings)
 	synthesis, raw, validationErrors, err := runStageAttempts(
 		ctx,
 		opts.Provider,

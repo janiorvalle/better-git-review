@@ -131,17 +131,75 @@ model = "sonnet"
 [providers.codex-cli]
 model = "gpt-5.6-luna"
 reasoning = "low"
+
+[analysis]
+summary_batch_max_files = 25
+stage_concurrency = 4
+digest_max_files = 40
+digest_max_chars = 60000
+file_diff_cap = 12000
+guard_call_threshold = 5
+staging_max_files = 150
+fidelity_budget = 4000000
+
+[viewer]
+collapse_threshold = 400
+fold_threshold = 10
+fold_context = 3
+long_line_threshold = 4096
+key_symbol_cap = 5
+word_diff_min_similarity = 0.5
+theme_light = "github"
+theme_dark = "github-dark"
+
+[media]
+max_preview_bytes = 1572864
+max_total_preview_bytes = 12582912
+image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
+
+[git]
+context_lines = 0
+find_renames = 0
+
+[github]
+pr_diff_max_files = 300
+list_limit = 1000
+
+[network]
+catalog_timeout_seconds = 10
+completion_timeout_seconds = 300
+provider_exec_timeout_seconds = 600
+
+[cache]
+max_entries = 200
+
+[browser]
+command = ""
 ```
 
 Never put an API key in config — `api_key_env` names the environment
 variable that holds it.
 
-One deliberate speed bump: repo config that wants to change your provider,
-endpoint, key variable, or mechanical-file selection isn't trusted
-automatically. You'll see exactly what it wants and confirm once; if those
-settings change later, you'll be asked again. A cloned repo shouldn't get
-to silently redirect your diffs or expand model spend.
+All values above are the defaults. `git.context_lines = 0` and
+`git.find_renames = 0` leave Git's defaults alone. `cache.max_entries = 0`
+disables eviction. Browser resolution is `browser.command`, then `$BROWSER`,
+then the platform default.
+
+Repo config may set only `auto_open`, `[viewer]`, and `[media]` without a
+trust prompt. Other tables above are user-config only and are ignored with a
+warning when found in repo config. Repo media byte limits may tighten, but
+cannot raise, the user's limits. Existing repo provider, endpoint, key
+variable, or mechanical-file settings remain trust-gated: you'll see exactly
+what the repo wants and confirm once; if those settings change later, you'll
+be asked again. A cloned repo shouldn't get to silently redirect your diffs
+or expand model spend.
 Non-interactive runs pass `--trust-repo-config` or `--yes`.
+
+Some invariants are deliberately not configurable: prompt-injection
+delimiters; Claude/Codex subprocess isolation flags (`--safe-mode`,
+`--sandbox`, and disabled features); `SchemaVersion`; the review-layer list;
+cache-key composition; and trust-file mechanics. These protect artifact
+compatibility and the security boundary rather than tune behavior.
 
 ## Cost, caching, and big diffs
 

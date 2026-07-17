@@ -44,20 +44,43 @@ type StagedPlan struct {
 	Cohorts        []PlannedCohort
 	SummaryBatches []SummaryBatch
 	Calls          int
+	settings       Settings
+}
+
+type Settings struct {
+	SummaryBatchMaxFiles int
+	StageConcurrency     int
+	DigestMaxFiles       int
+	DigestMaxChars       int
+	FileDiffCap          int
+	StagingMaxFiles      int
+}
+
+func DefaultSettings() Settings {
+	return Settings{
+		SummaryBatchMaxFiles: SummaryBatchMaxFiles, StageConcurrency: StageConcurrency,
+		DigestMaxFiles: DigestMaxFiles, DigestMaxChars: DigestMaxChars,
+		FileDiffCap: maxFileDiffCap, StagingMaxFiles: CohortMaxFiles,
+	}
 }
 
 func PlanStaged(files []document.File, generated map[int]bool, includeMechanical bool, budget int) StagedPlan {
+	return PlanStagedWithSettings(files, generated, includeMechanical, budget, DefaultSettings())
+}
+
+func PlanStagedWithSettings(files []document.File, generated map[int]bool, includeMechanical bool, budget int, settings Settings) StagedPlan {
 	if budget <= 0 {
 		budget = provider.DefaultAnalysisBudget
 	}
 	triage := Triage(files, generated, includeMechanical)
-	cohorts := PlanCohorts(files)
-	batches := PlanSummaryBatches(files, triage.ReviewWorthy, budget)
+	cohorts := PlanCohortsWithMax(files, settings.StagingMaxFiles)
+	batches := PlanSummaryBatchesWithSettings(files, triage.ReviewWorthy, budget, settings)
 	return StagedPlan{
 		Triage:         triage,
 		Cohorts:        cohorts,
 		SummaryBatches: batches,
 		Calls:          len(batches) + len(cohorts) + 1,
+		settings:       settings,
 	}
 }
 
@@ -148,6 +171,10 @@ func stripWhitespace(value string) string {
 }
 
 func PlanSummaryBatches(files []document.File, indexes []int, budget int) []SummaryBatch {
+	return PlanSummaryBatchesWithSettings(files, indexes, budget, DefaultSettings())
+}
+
+func PlanSummaryBatchesWithSettings(files []document.File, indexes []int, budget int, settings Settings) []SummaryBatch {
 	if budget <= 0 {
 		budget = provider.DefaultAnalysisBudget
 	}
@@ -159,10 +186,10 @@ func PlanSummaryBatches(files []document.File, indexes []int, budget int) []Summ
 	current := SummaryBatch{}
 	for _, fileIndex := range ordered {
 		headerChars := len(fileHeader(fileIndex, files[fileIndex]))
-		fullDiffChars := len(fileDiffTextBounded(files[fileIndex], maxFileDiffCap))
+		fullDiffChars := len(fileDiffTextBounded(files[fileIndex], settings.FileDiffCap))
 		inputChars := headerChars + fullDiffChars
 		if len(current.Files) > 0 &&
-			(len(current.Files) == SummaryBatchMaxFiles ||
+			(len(current.Files) == settings.SummaryBatchMaxFiles ||
 				current.InputChars+inputChars > contentBudget) {
 			result = append(result, current)
 			current = SummaryBatch{}
@@ -197,6 +224,10 @@ func summaryBatchPromptOverheadChars() int {
 }
 
 func PlanCohorts(files []document.File) []PlannedCohort {
+	return PlanCohortsWithMax(files, CohortMaxFiles)
+}
+
+func PlanCohortsWithMax(files []document.File, maxFiles int) []PlannedCohort {
 	type groupKey struct {
 		layer string
 		top   string
@@ -214,7 +245,7 @@ func PlanCohorts(files []document.File) []PlannedCohort {
 	var result []PlannedCohort
 	for key, indexes := range groups {
 		sortFileIndexes(files, indexes)
-		result = append(result, splitCohort(files, key.layer, key.top, indexes, 1)...)
+		result = append(result, splitCohort(files, key.layer, key.top, indexes, 1, maxFiles)...)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		left := files[result[i].Files[0]].Path
@@ -227,8 +258,8 @@ func PlanCohorts(files []document.File) []PlannedCohort {
 	return result
 }
 
-func splitCohort(files []document.File, layer, directory string, indexes []int, depth int) []PlannedCohort {
-	if len(indexes) <= CohortMaxFiles {
+func splitCohort(files []document.File, layer, directory string, indexes []int, depth, maxFiles int) []PlannedCohort {
+	if len(indexes) <= maxFiles {
 		return []PlannedCohort{newPlannedCohort(layer, directory, indexes, 0, 0)}
 	}
 	hasSubdirectory := false
@@ -239,7 +270,7 @@ func splitCohort(files []document.File, layer, directory string, indexes []int, 
 		}
 	}
 	if !hasSubdirectory {
-		return chunkFlatCohort(layer, directory, indexes)
+		return chunkFlatCohort(layer, directory, indexes, maxFiles)
 	}
 	partitions := map[string][]int{}
 	for _, index := range indexes {
@@ -267,19 +298,19 @@ func splitCohort(files []document.File, layer, directory string, indexes []int, 
 		}
 		child := partitions[key]
 		if key == "" {
-			result = append(result, chunkFlatCohort(layer, childDirectory, child)...)
+			result = append(result, chunkFlatCohort(layer, childDirectory, child, maxFiles)...)
 		} else {
-			result = append(result, splitCohort(files, layer, childDirectory, child, depth+1)...)
+			result = append(result, splitCohort(files, layer, childDirectory, child, depth+1, maxFiles)...)
 		}
 	}
 	return result
 }
 
-func chunkFlatCohort(layer, directory string, indexes []int) []PlannedCohort {
-	total := (len(indexes) + CohortMaxFiles - 1) / CohortMaxFiles
+func chunkFlatCohort(layer, directory string, indexes []int, maxFiles int) []PlannedCohort {
+	total := (len(indexes) + maxFiles - 1) / maxFiles
 	result := make([]PlannedCohort, 0, total)
-	for start, chunk := 0, 1; start < len(indexes); start, chunk = start+CohortMaxFiles, chunk+1 {
-		end := min(start+CohortMaxFiles, len(indexes))
+	for start, chunk := 0, 1; start < len(indexes); start, chunk = start+maxFiles, chunk+1 {
+		end := min(start+maxFiles, len(indexes))
 		result = append(result, newPlannedCohort(layer, directory, indexes[start:end], chunk, total))
 	}
 	return result
@@ -306,7 +337,18 @@ func BuildCohortDigest(
 	summaries []FileSummary,
 	budget int,
 ) string {
-	capChars := min(max(budget, 0), DigestMaxChars)
+	return BuildCohortDigestWithSettings(files, cohort, triage, summaries, budget, DefaultSettings())
+}
+
+func BuildCohortDigestWithSettings(
+	files []document.File,
+	cohort PlannedCohort,
+	triage TriageResult,
+	summaries []FileSummary,
+	budget int,
+	settings Settings,
+) string {
+	capChars := min(max(budget, 0), settings.DigestMaxChars)
 	if capChars == 0 {
 		return ""
 	}
@@ -351,7 +393,7 @@ func BuildCohortDigest(
 		mechanicalCount, flaggedCount, additions, deletions)
 	digest.WriteString("SAMPLED_SUMMARIES:\n")
 	for position, index := range candidates {
-		if position >= DigestMaxFiles {
+		if position >= settings.DigestMaxFiles {
 			break
 		}
 		flags := strings.Join(triage.Flags[index], ", ")

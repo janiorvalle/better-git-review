@@ -184,9 +184,9 @@ func TestEmptyGitDiffEntersPickerWhenInputIsTTY(t *testing.T) {
 
 	configHome := useTestConfigHome(t)
 	useTestStateHome(t)
-	if err := config.WriteUser(filepath.Join(configHome, "better-git-review", "config.toml"), config.Config{
-		Provider: "mock", Providers: map[string]config.ProviderConfig{},
-	}); err != nil {
+	cfg := config.Defaults()
+	cfg.Provider = "mock"
+	if err := config.WriteUser(filepath.Join(configHome, "better-git-review", "config.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(t.TempDir(), "picked.html")
@@ -205,6 +205,25 @@ func TestEmptyGitDiffEntersPickerWhenInputIsTTY(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "Review what?") || !strings.Contains(stderr.String(), "running: bgr --commit") {
 		t.Fatalf("picker transcript missing:\n%s", stderr.String())
+	}
+}
+
+func TestBrowserCommandPreservesQuotedArguments(t *testing.T) {
+	name, args, ok := browserCommand("darwin", "/tmp/review file.html", `open -a "Google Chrome"`)
+	if !ok || name != "open" {
+		t.Fatalf("command = %q, ok = %v", name, ok)
+	}
+	want := []string{"-a", "Google Chrome", "/tmp/review file.html"}
+	if !slices.Equal(args, want) {
+		t.Fatalf("args = %#v, want %#v", args, want)
+	}
+}
+
+func TestBrowserCommandPreservesQuotedWindowsExecutable(t *testing.T) {
+	name, args, ok := browserCommand("windows", `C:\review.html`, `"C:\Program Files\Google\Chrome\Application\chrome.exe" --new-window`)
+	if !ok || name != `C:\Program Files\Google\Chrome\Application\chrome.exe` ||
+		!slices.Equal(args, []string{"--new-window", `C:\review.html`}) {
+		t.Fatalf("command = %q %#v, ok = %v", name, args, ok)
 	}
 }
 

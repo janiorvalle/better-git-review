@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/janiorvalle/better-git-review/internal/xdg"
 )
 
@@ -22,6 +23,92 @@ type Config struct {
 	AutoOpen          *bool                     `toml:"auto_open"`
 	IncludeMechanical *bool                     `toml:"include_mechanical"`
 	Providers         map[string]ProviderConfig `toml:"providers"`
+	Analysis          AnalysisConfig            `toml:"analysis"`
+	Viewer            ViewerConfig              `toml:"viewer"`
+	Media             MediaConfig               `toml:"media"`
+	Git               GitConfig                 `toml:"git"`
+	GitHub            GitHubConfig              `toml:"github"`
+	Network           NetworkConfig             `toml:"network"`
+	Cache             CacheConfig               `toml:"cache"`
+	Browser           BrowserConfig             `toml:"browser"`
+}
+
+type AnalysisConfig struct {
+	SummaryBatchMaxFiles int `toml:"summary_batch_max_files" json:"summaryBatchMaxFiles"`
+	StageConcurrency     int `toml:"stage_concurrency" json:"stageConcurrency"`
+	DigestMaxFiles       int `toml:"digest_max_files" json:"digestMaxFiles"`
+	DigestMaxChars       int `toml:"digest_max_chars" json:"digestMaxChars"`
+	FileDiffCap          int `toml:"file_diff_cap" json:"fileDiffCap"`
+	GuardCallThreshold   int `toml:"guard_call_threshold" json:"guardCallThreshold"`
+	StagingMaxFiles      int `toml:"staging_max_files" json:"stagingMaxFiles"`
+	FidelityBudget       int `toml:"fidelity_budget" json:"fidelityBudget"`
+}
+
+type ViewerConfig struct {
+	CollapseThreshold     int     `toml:"collapse_threshold"`
+	FoldThreshold         int     `toml:"fold_threshold"`
+	FoldContext           int     `toml:"fold_context"`
+	LongLineThreshold     int     `toml:"long_line_threshold"`
+	KeySymbolCap          int     `toml:"key_symbol_cap"`
+	WordDiffMinSimilarity float64 `toml:"word_diff_min_similarity"`
+	ThemeLight            string  `toml:"theme_light"`
+	ThemeDark             string  `toml:"theme_dark"`
+}
+
+type MediaConfig struct {
+	MaxPreviewBytes      int64    `toml:"max_preview_bytes"`
+	MaxTotalPreviewBytes int64    `toml:"max_total_preview_bytes"`
+	ImageExtensions      []string `toml:"image_extensions"`
+}
+
+type GitConfig struct {
+	ContextLines int `toml:"context_lines" json:"contextLines"`
+	FindRenames  int `toml:"find_renames" json:"findRenames"`
+}
+
+type GitHubConfig struct {
+	PRDiffMaxFiles int `toml:"pr_diff_max_files"`
+	ListLimit      int `toml:"list_limit"`
+}
+
+type NetworkConfig struct {
+	CatalogTimeoutSeconds      int `toml:"catalog_timeout_seconds"`
+	CompletionTimeoutSeconds   int `toml:"completion_timeout_seconds"`
+	ProviderExecTimeoutSeconds int `toml:"provider_exec_timeout_seconds"`
+}
+
+type CacheConfig struct {
+	MaxEntries int `toml:"max_entries"`
+}
+
+type BrowserConfig struct {
+	Command string `toml:"command"`
+}
+
+func Defaults() Config {
+	return Config{
+		Providers: map[string]ProviderConfig{},
+		Analysis: AnalysisConfig{
+			SummaryBatchMaxFiles: 25, StageConcurrency: 4, DigestMaxFiles: 40,
+			DigestMaxChars: 60_000, FileDiffCap: 12_000, GuardCallThreshold: 5,
+			StagingMaxFiles: 150, FidelityBudget: 4_000_000,
+		},
+		Viewer: ViewerConfig{
+			CollapseThreshold: 400, FoldThreshold: 10, FoldContext: 3,
+			LongLineThreshold: 4_096, KeySymbolCap: 5, WordDiffMinSimilarity: 0.5,
+			ThemeLight: "github", ThemeDark: "github-dark",
+		},
+		Media: MediaConfig{
+			MaxPreviewBytes: 1_572_864, MaxTotalPreviewBytes: 12_582_912,
+			ImageExtensions: []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"},
+		},
+		GitHub: GitHubConfig{PRDiffMaxFiles: 300, ListLimit: 1_000},
+		Network: NetworkConfig{
+			CatalogTimeoutSeconds: 10, CompletionTimeoutSeconds: 300,
+			ProviderExecTimeoutSeconds: 600,
+		},
+		Cache: CacheConfig{MaxEntries: 200},
+	}
 }
 
 type ProviderConfig struct {
@@ -86,14 +173,25 @@ func Load(opts LoadOptions) (Loaded, error) {
 		opts.RepoConfigPath = filepath.Join(opts.RepoDir, ".better-git-review.toml")
 	}
 
-	userCfg, userFound, err := readConfig(opts.UserConfigPath)
+	userCfg, userFound, _, err := readConfig(opts.UserConfigPath, Defaults())
 	if err != nil {
 		return Loaded{}, fmt.Errorf("read user config: %w", err)
 	}
-	repoCfg, repoFound, err := readConfig(opts.RepoConfigPath)
+	repoCfg, repoFound, repoDefined, err := readConfig(opts.RepoConfigPath, Config{Providers: map[string]ProviderConfig{}})
 	if err != nil {
 		return Loaded{}, fmt.Errorf("read repo config: %w", err)
 	}
+	for _, table := range []string{"analysis", "git", "github", "network", "cache", "browser"} {
+		if repoDefined[table] {
+			fmt.Fprintf(opts.Output, "warning: repo config key [%s] is user-config only; ignoring it\n", table)
+		}
+	}
+	repoCfg.Analysis = AnalysisConfig{}
+	repoCfg.Git = GitConfig{}
+	repoCfg.GitHub = GitHubConfig{}
+	repoCfg.Network = NetworkConfig{}
+	repoCfg.Cache = CacheConfig{}
+	repoCfg.Browser = BrowserConfig{}
 	if repoFound && HasProviderSettings(repoCfg) {
 		if err := ensureRepoTrust(opts, repoCfg); err != nil {
 			return Loaded{}, err
@@ -101,6 +199,13 @@ func Load(opts LoadOptions) (Loaded, error) {
 	}
 
 	merged := Merge(userCfg, repoCfg)
+	applyRepoAllowed(&merged, repoCfg, repoDefined, userCfg.Media)
+	if err := Validate(merged); err != nil {
+		return Loaded{}, err
+	}
+	if merged.Analysis.StagingMaxFiles > 150 {
+		fmt.Fprintf(opts.Output, "warning: analysis.staging_max_files above 150 may break model output caps\n")
+	}
 	if opts.Flags.Provider != "" {
 		merged.Provider = opts.Flags.Provider
 	}
@@ -138,6 +243,14 @@ func Merge(base, override Config) Config {
 		AutoOpen:          cloneBool(base.AutoOpen),
 		IncludeMechanical: cloneBool(base.IncludeMechanical),
 		Providers:         cloneProviders(base.Providers),
+		Analysis:          base.Analysis,
+		Viewer:            base.Viewer,
+		Media:             cloneMedia(base.Media),
+		Git:               base.Git,
+		GitHub:            base.GitHub,
+		Network:           base.Network,
+		Cache:             base.Cache,
+		Browser:           base.Browser,
 	}
 	if override.Provider != "" {
 		result.Provider = override.Provider
@@ -170,6 +283,8 @@ func Merge(base, override Config) Config {
 		}
 		result.Providers[name] = current
 	}
+	mergeViewer(&result.Viewer, override.Viewer)
+	mergeMedia(&result.Media, override.Media)
 	return result
 }
 
@@ -196,6 +311,18 @@ func Fingerprint(cfg Config) (string, error) {
 		canonical.Providers = append(canonical.Providers, providerEntry{Name: name, Config: cfg.Providers[name]})
 	}
 	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func AnalysisFingerprint(cfg Config) (string, error) {
+	encoded, err := json.Marshal(struct {
+		Analysis AnalysisConfig `json:"analysis"`
+		Git      GitConfig      `json:"git"`
+	}{cfg.Analysis, cfg.Git})
 	if err != nil {
 		return "", err
 	}
@@ -284,25 +411,64 @@ func ensureRepoTrust(opts LoadOptions, repoCfg Config) error {
 	return nil
 }
 
-func readConfig(path string) (Config, bool, error) {
-	cfg := Config{Providers: map[string]ProviderConfig{}}
+func readConfig(path string, seed Config) (Config, bool, map[string]bool, error) {
+	cfg := seed
+	if cfg.Providers == nil {
+		cfg.Providers = map[string]ProviderConfig{}
+	}
 	if path == "" {
-		return cfg, false, nil
+		return cfg, false, map[string]bool{}, nil
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return cfg, false, nil
+		return cfg, false, map[string]bool{}, nil
 	}
 	if err != nil {
-		return Config{}, false, err
+		return Config{}, false, nil, err
 	}
-	if _, err := toml.Decode(string(data), &cfg); err != nil {
-		return Config{}, false, err
+	metadata, err := toml.Decode(string(data), &cfg)
+	if err != nil {
+		return Config{}, false, nil, err
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]ProviderConfig{}
 	}
-	return cfg, true, nil
+	defined := map[string]bool{}
+	for _, key := range metadata.Keys() {
+		if len(key) > 0 {
+			defined[key[0]] = true
+			defined[strings.Join(key, ".")] = true
+		}
+	}
+	return cfg, true, defined, nil
+}
+
+func applyRepoAllowed(target *Config, value Config, defined map[string]bool, userMedia MediaConfig) {
+	viewerFields := []struct {
+		key   string
+		apply func()
+	}{
+		{"viewer.collapse_threshold", func() { target.Viewer.CollapseThreshold = value.Viewer.CollapseThreshold }},
+		{"viewer.fold_threshold", func() { target.Viewer.FoldThreshold = value.Viewer.FoldThreshold }},
+		{"viewer.fold_context", func() { target.Viewer.FoldContext = value.Viewer.FoldContext }},
+		{"viewer.long_line_threshold", func() { target.Viewer.LongLineThreshold = value.Viewer.LongLineThreshold }},
+		{"viewer.key_symbol_cap", func() { target.Viewer.KeySymbolCap = value.Viewer.KeySymbolCap }},
+		{"viewer.word_diff_min_similarity", func() { target.Viewer.WordDiffMinSimilarity = value.Viewer.WordDiffMinSimilarity }},
+		{"viewer.theme_light", func() { target.Viewer.ThemeLight = value.Viewer.ThemeLight }},
+		{"viewer.theme_dark", func() { target.Viewer.ThemeDark = value.Viewer.ThemeDark }},
+		{"media.max_preview_bytes", func() {
+			target.Media.MaxPreviewBytes = min(value.Media.MaxPreviewBytes, userMedia.MaxPreviewBytes)
+		}},
+		{"media.max_total_preview_bytes", func() {
+			target.Media.MaxTotalPreviewBytes = min(value.Media.MaxTotalPreviewBytes, userMedia.MaxTotalPreviewBytes)
+		}},
+		{"media.image_extensions", func() { target.Media.ImageExtensions = append([]string(nil), value.Media.ImageExtensions...) }},
+	}
+	for _, field := range viewerFields {
+		if defined[field.key] {
+			field.apply()
+		}
+	}
 }
 
 func readTrust(path string) (trustFile, error) {
@@ -368,6 +534,124 @@ func cloneBool(value *bool) *bool {
 	}
 	copy := *value
 	return &copy
+}
+
+func cloneMedia(value MediaConfig) MediaConfig {
+	value.ImageExtensions = append([]string(nil), value.ImageExtensions...)
+	return value
+}
+
+func mergeViewer(target *ViewerConfig, value ViewerConfig) {
+	if value.CollapseThreshold != 0 {
+		target.CollapseThreshold = value.CollapseThreshold
+	}
+	if value.FoldThreshold != 0 {
+		target.FoldThreshold = value.FoldThreshold
+	}
+	if value.FoldContext != 0 {
+		target.FoldContext = value.FoldContext
+	}
+	if value.LongLineThreshold != 0 {
+		target.LongLineThreshold = value.LongLineThreshold
+	}
+	if value.KeySymbolCap != 0 {
+		target.KeySymbolCap = value.KeySymbolCap
+	}
+	if value.WordDiffMinSimilarity != 0 {
+		target.WordDiffMinSimilarity = value.WordDiffMinSimilarity
+	}
+	if value.ThemeLight != "" {
+		target.ThemeLight = value.ThemeLight
+	}
+	if value.ThemeDark != "" {
+		target.ThemeDark = value.ThemeDark
+	}
+}
+
+func mergeMedia(target *MediaConfig, value MediaConfig) {
+	if value.MaxPreviewBytes != 0 {
+		target.MaxPreviewBytes = value.MaxPreviewBytes
+	}
+	if value.MaxTotalPreviewBytes != 0 {
+		target.MaxTotalPreviewBytes = value.MaxTotalPreviewBytes
+	}
+	if value.ImageExtensions != nil {
+		target.ImageExtensions = append([]string(nil), value.ImageExtensions...)
+	}
+}
+
+func Validate(cfg Config) error {
+	positive := []struct {
+		key   string
+		value int64
+	}{
+		{"analysis.summary_batch_max_files", int64(cfg.Analysis.SummaryBatchMaxFiles)},
+		{"analysis.stage_concurrency", int64(cfg.Analysis.StageConcurrency)},
+		{"analysis.digest_max_files", int64(cfg.Analysis.DigestMaxFiles)},
+		{"analysis.digest_max_chars", int64(cfg.Analysis.DigestMaxChars)},
+		{"analysis.file_diff_cap", int64(cfg.Analysis.FileDiffCap)},
+		{"analysis.guard_call_threshold", int64(cfg.Analysis.GuardCallThreshold)},
+		{"analysis.fidelity_budget", int64(cfg.Analysis.FidelityBudget)},
+		{"viewer.collapse_threshold", int64(cfg.Viewer.CollapseThreshold)},
+		{"viewer.fold_threshold", int64(cfg.Viewer.FoldThreshold)},
+		{"viewer.fold_context", int64(cfg.Viewer.FoldContext)},
+		{"viewer.long_line_threshold", int64(cfg.Viewer.LongLineThreshold)},
+		{"viewer.key_symbol_cap", int64(cfg.Viewer.KeySymbolCap)},
+		{"media.max_preview_bytes", cfg.Media.MaxPreviewBytes},
+		{"media.max_total_preview_bytes", cfg.Media.MaxTotalPreviewBytes},
+		{"github.pr_diff_max_files", int64(cfg.GitHub.PRDiffMaxFiles)},
+		{"github.list_limit", int64(cfg.GitHub.ListLimit)},
+		{"network.catalog_timeout_seconds", int64(cfg.Network.CatalogTimeoutSeconds)},
+		{"network.completion_timeout_seconds", int64(cfg.Network.CompletionTimeoutSeconds)},
+		{"network.provider_exec_timeout_seconds", int64(cfg.Network.ProviderExecTimeoutSeconds)},
+	}
+	for _, item := range positive {
+		if item.value <= 0 {
+			return fmt.Errorf("%s must be a positive integer", item.key)
+		}
+	}
+	if cfg.Analysis.StagingMaxFiles < 10 || cfg.Analysis.StagingMaxFiles > 500 {
+		return fmt.Errorf("analysis.staging_max_files must be between 10 and 500")
+	}
+	if cfg.Viewer.WordDiffMinSimilarity < 0 || cfg.Viewer.WordDiffMinSimilarity > 1 {
+		return fmt.Errorf("viewer.word_diff_min_similarity must be between 0 and 1")
+	}
+	if cfg.Viewer.FoldContext > cfg.Viewer.FoldThreshold/2 {
+		return fmt.Errorf("viewer.fold_context must be at most half of viewer.fold_threshold")
+	}
+	if cfg.Git.ContextLines < 0 {
+		return fmt.Errorf("git.context_lines must be 0 or a positive integer")
+	}
+	if cfg.Git.FindRenames < 0 || cfg.Git.FindRenames > 100 {
+		return fmt.Errorf("git.find_renames must be between 0 and 100")
+	}
+	if cfg.Cache.MaxEntries < 0 {
+		return fmt.Errorf("cache.max_entries must be 0 or a positive integer")
+	}
+	if strings.TrimSpace(cfg.Viewer.ThemeLight) == "" {
+		return fmt.Errorf("viewer.theme_light must not be empty")
+	}
+	if _, ok := styles.Registry[strings.ToLower(cfg.Viewer.ThemeLight)]; !ok {
+		return fmt.Errorf("viewer.theme_light names an unknown Chroma theme %q", cfg.Viewer.ThemeLight)
+	}
+	if strings.TrimSpace(cfg.Viewer.ThemeDark) == "" {
+		return fmt.Errorf("viewer.theme_dark must not be empty")
+	}
+	if _, ok := styles.Registry[strings.ToLower(cfg.Viewer.ThemeDark)]; !ok {
+		return fmt.Errorf("viewer.theme_dark names an unknown Chroma theme %q", cfg.Viewer.ThemeDark)
+	}
+	if len(cfg.Media.ImageExtensions) == 0 {
+		return fmt.Errorf("media.image_extensions must contain at least one extension")
+	}
+	supportedImages := map[string]bool{
+		".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".svg": true,
+	}
+	for _, extension := range cfg.Media.ImageExtensions {
+		if !supportedImages[strings.ToLower(extension)] {
+			return fmt.Errorf("media.image_extensions contains unsupported extension %q", extension)
+		}
+	}
+	return nil
 }
 
 func UserConfigPath() (string, error) {

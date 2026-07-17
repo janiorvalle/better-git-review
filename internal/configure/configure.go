@@ -95,7 +95,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	providerCfg := opts.Current.Providers[providerName]
-	selection, err := opts.Registry.Create(providerName, providerCfg)
+	selection, err := opts.Registry.Create(providerName, providerCfg, opts.Current)
 	if err != nil {
 		return Result{}, err
 	}

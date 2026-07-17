@@ -52,7 +52,7 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 			return source.Result{}, err
 		}
 		opts.Logf("reviewing uncommitted changes%s ...", inDir(opts.RepoDir))
-		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(headRef)...)
+		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgsWithOptions(headRef, opts.GitContextLines, opts.GitFindRenames)...)
 		if err != nil {
 			return source.Result{}, fmt.Errorf("git diff HEAD: %w", err)
 		}
@@ -72,11 +72,11 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		}
 		if !root {
 			baseRef = parent
-			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(baseRef+".."+headRef)...)
+			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgsWithOptions(baseRef+".."+headRef, opts.GitContextLines, opts.GitFindRenames)...)
 		} else {
 			baseRef = ""
 			rangeText = opts.Commit + " (root commit)"
-			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.RootDiffArgs(headRef)...)
+			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.RootDiffArgsWithOptions(headRef, opts.GitContextLines, opts.GitFindRenames)...)
 		}
 		if err != nil {
 			return source.Result{}, fmt.Errorf("git diff commit %s: %w", opts.Commit, err)
@@ -97,14 +97,14 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 			return source.Result{}, err
 		}
 		opts.Logf("reviewing %s...%s%s ...", baseName, headName, inDir(opts.RepoDir))
-		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(baseRef+"..."+headRef)...)
+		diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgsWithOptions(baseRef+"..."+headRef, opts.GitContextLines, opts.GitFindRenames)...)
 		if err != nil {
 			return source.Result{}, fmt.Errorf("git diff %s...%s: %w", baseName, headName, err)
 		}
 		rangeText = baseName + "..." + headName
 		if len(bytes.TrimSpace(diffBytes)) == 0 && opts.Head == "" {
 			opts.Logf("branch is clean against %s - reviewing uncommitted changes instead", baseName)
-			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgs(headRef)...)
+			diffBytes, err = runner.Run(ctx, opts.RepoDir, gitexec.DiffArgsWithOptions(headRef, opts.GitContextLines, opts.GitFindRenames)...)
 			if err != nil {
 				return source.Result{}, fmt.Errorf("git diff HEAD: %w", err)
 			}

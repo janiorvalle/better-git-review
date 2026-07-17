@@ -27,6 +27,7 @@ func TestDependencyAllowlist(t *testing.T) {
 		"github.com/BurntSushi/toml":      true,
 		"github.com/alecthomas/chroma/v2": true,
 		"github.com/dlclark/regexp2":      true,
+		"github.com/google/shlex":         true,
 	}
 	found := map[string]bool{}
 	inRequireBlock := false

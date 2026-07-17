@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/janiorvalle/better-git-review/internal/provider"
 )
@@ -18,10 +19,17 @@ func (Adapter) Name() string {
 }
 
 func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, string, []string, error) {
-	return newWithEffortSupport(opts, supportsEffort())
+	timeoutSeconds := opts.ProviderExecTimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 600
+	}
+	return newWithEffortSupport(opts, supportsEffort(time.Duration(timeoutSeconds)*time.Second))
 }
 
 func newWithEffortSupport(opts provider.AdapterOptions, effortSupported bool) (provider.Provider, string, string, []string, error) {
+	if opts.ProviderExecTimeoutSeconds <= 0 {
+		opts.ProviderExecTimeoutSeconds = 600
+	}
 	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "sonnet")
 	reasoning := provider.ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "")
 	if err := provider.ValidateReasoning("claude-cli", reasoning, claudeReasoningLevels...); err != nil {
@@ -32,13 +40,17 @@ func newWithEffortSupport(opts provider.AdapterOptions, effortSupported bool) (p
 		warnings = append(warnings, "installed claude-cli does not support --effort; continuing without applying reasoning")
 		reasoning = ""
 	}
-	return &CLI{Model: model, Reasoning: reasoning, EffortSupported: effortSupported}, model, reasoning, warnings, nil
+	return &CLI{
+		Model: model, Reasoning: reasoning, EffortSupported: effortSupported,
+		ExecTimeout: time.Duration(opts.ProviderExecTimeoutSeconds) * time.Second,
+	}, model, reasoning, warnings, nil
 }
 
 type CLI struct {
 	Model           string
 	Reasoning       string
 	EffortSupported bool
+	ExecTimeout     time.Duration
 }
 
 func (p *CLI) Name() string { return "claude-cli" }
@@ -77,7 +89,7 @@ func (p *CLI) Complete(ctx context.Context, prompt string) (string, error) {
 	if p.Reasoning != "" && p.EffortSupported {
 		args = append(args, "--effort", p.Reasoning)
 	}
-	output, err := provider.RunCommand(ctx, isolatedDir, []byte(prompt), "claude", args...)
+	output, err := provider.RunCommandTimeout(ctx, p.ExecTimeout, isolatedDir, []byte(prompt), "claude", args...)
 	if err != nil {
 		return "", err
 	}
@@ -101,8 +113,8 @@ func (p *CLI) ReasoningLevels() []string {
 
 var claudeReasoningLevels = []string{"low", "medium", "high", "xhigh", "max"}
 
-func supportsEffort() bool {
-	output, err := exec.Command("claude", "--help").CombinedOutput()
+func supportsEffort(timeout time.Duration) bool {
+	output, err := provider.RunCommandTimeout(context.Background(), timeout, "", nil, "claude", "--help")
 	return err == nil && strings.Contains(string(output), "--effort")
 }
 
