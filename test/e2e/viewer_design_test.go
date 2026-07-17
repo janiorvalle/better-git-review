@@ -33,6 +33,10 @@ func TestViewerNavAndThemeControls(t *testing.T) {
 		// #13: manual-override CSS scopes exist alongside the no-JS fallback.
 		`:root[data-theme="dark"]`,
 		`:root:not([data-theme])`,
+		// Resizable sidebar rail (PR #9): handle, CSS variable, persistence.
+		`id="rail-resizer"`,
+		`var(--rail-width, 316px)`,
+		`localStorage.getItem(railKey)`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("HTML missing %q", expected)
