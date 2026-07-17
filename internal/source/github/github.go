@@ -74,7 +74,13 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 		diffErr    error
 		fallbackOn string
 	)
-	if meta.ChangedFiles > 300 {
+	maxFiles := opts.GitHubPRDiffMaxFiles
+	if maxFiles == 0 {
+		maxFiles = 300
+	}
+	if opts.GitContextLines > 0 || opts.GitFindRenames > 0 {
+		fallbackOn = "configured Git diff settings require local git objects"
+	} else if meta.ChangedFiles > maxFiles {
 		fallbackOn = fmt.Sprintf("GitHub reports %d changed files", meta.ChangedFiles)
 	} else {
 		diffBytes, diffErr = s.diffWithRetry(ctx, runner, opts)
@@ -84,7 +90,7 @@ func (s Source) Collect(ctx context.Context, opts source.Options) (source.Result
 	}
 	if fallbackOn != "" {
 		opts.Logf("%s - using local git objects instead ...", fallbackOn)
-		diffBytes, err = s.localDiff(ctx, opts.RepoDir, meta.URL, meta.BaseRefOID, meta.HeadRefOID)
+		diffBytes, err = s.localDiff(ctx, opts.RepoDir, meta.URL, meta.BaseRefOID, meta.HeadRefOID, opts.GitContextLines, opts.GitFindRenames)
 		if err != nil {
 			return source.Result{}, fmt.Errorf("%s; local-git fallback failed: %w. Run PR mode from a clone with a remote matching the PR repository", fallbackOn, err)
 		}
@@ -130,12 +136,19 @@ func (s Source) diffWithRetry(ctx context.Context, runner Runner, opts source.Op
 	return nil, lastErr
 }
 
-func (s Source) localDiff(ctx context.Context, repoDir, prURL, baseOID, headOID string) ([]byte, error) {
+func (s Source) localDiff(ctx context.Context, repoDir, prURL, baseOID, headOID string, diffOptions ...int) ([]byte, error) {
 	if err := s.fetchObjects(ctx, repoDir, prURL, baseOID, headOID, true); err != nil {
 		return nil, err
 	}
 	runner := s.gitRunner()
-	diffBytes, err := runner.Run(ctx, repoDir, gitexec.DiffArgs(baseOID+"..."+headOID)...)
+	contextLines, findRenames := 0, 0
+	if len(diffOptions) > 0 {
+		contextLines = diffOptions[0]
+	}
+	if len(diffOptions) > 1 {
+		findRenames = diffOptions[1]
+	}
+	diffBytes, err := runner.Run(ctx, repoDir, gitexec.DiffArgsWithOptions(baseOID+"..."+headOID, contextLines, findRenames)...)
 	if err != nil {
 		return nil, fmt.Errorf("git diff %s...%s: %w", baseOID, headOID, err)
 	}

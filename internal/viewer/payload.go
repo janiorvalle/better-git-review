@@ -13,6 +13,10 @@ import (
 // private array format minimizes serialized overhead before JavaScript stamps
 // unified and split rows into the live DOM.
 func compactDiffJSON(files []document.File, views []FileView) (string, error) {
+	return compactDiffJSONWithSettings(files, views, DefaultSettings())
+}
+
+func compactDiffJSONWithSettings(files []document.File, views []FileView, settings Settings) (string, error) {
 	var output bytes.Buffer
 	output.WriteString(`{"f":[`)
 	for fileIndex, file := range files {
@@ -58,7 +62,7 @@ func compactDiffJSON(files []document.File, views []FileView) (string, error) {
 				if err := writeJSONString(&output, line.Text); err != nil {
 					return "", err
 				}
-				if isLongLine(line.Text) {
+				if isLongLineWithThreshold(line.Text, settings.LongLineThreshold) {
 					output.WriteString(`,1]`)
 				} else {
 					output.WriteString(`,0]`)

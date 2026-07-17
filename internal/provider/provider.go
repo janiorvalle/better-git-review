@@ -65,13 +65,16 @@ type Adapter interface {
 }
 
 type AdapterOptions struct {
-	ModelOverride       string
-	ConfiguredModel     string
-	ReasoningOverride   string
-	ConfiguredReasoning string
-	APIKeyEnv           string
-	BaseURL             string
-	Getenv              func(string) string
+	ModelOverride              string
+	ConfiguredModel            string
+	ReasoningOverride          string
+	ConfiguredReasoning        string
+	APIKeyEnv                  string
+	BaseURL                    string
+	Getenv                     func(string) string
+	CatalogTimeoutSeconds      int
+	CompletionTimeoutSeconds   int
+	ProviderExecTimeoutSeconds int
 }
 
 type Registry struct {
@@ -123,13 +126,16 @@ func (r Registry) selectNamed(name string, opts SelectOptions) (Selection, error
 			continue
 		}
 		selected, model, reasoning, warnings, err := adapter.New(AdapterOptions{
-			ModelOverride:       opts.ModelOverride,
-			ConfiguredModel:     providerConfig.Model,
-			ReasoningOverride:   opts.ReasoningOverride,
-			ConfiguredReasoning: providerConfig.Reasoning,
-			APIKeyEnv:           providerConfig.APIKeyEnv,
-			BaseURL:             providerConfig.BaseURL,
-			Getenv:              opts.Getenv,
+			ModelOverride:              opts.ModelOverride,
+			ConfiguredModel:            providerConfig.Model,
+			ReasoningOverride:          opts.ReasoningOverride,
+			ConfiguredReasoning:        providerConfig.Reasoning,
+			APIKeyEnv:                  providerConfig.APIKeyEnv,
+			BaseURL:                    providerConfig.BaseURL,
+			Getenv:                     opts.Getenv,
+			CatalogTimeoutSeconds:      opts.Config.Network.CatalogTimeoutSeconds,
+			CompletionTimeoutSeconds:   opts.Config.Network.CompletionTimeoutSeconds,
+			ProviderExecTimeoutSeconds: opts.Config.Network.ProviderExecTimeoutSeconds,
 		})
 		if err != nil {
 			return Selection{}, err
@@ -191,9 +197,18 @@ func (r Registry) Names() []string {
 	return names
 }
 
-func (r Registry) Create(name string, cfg config.ProviderConfig) (Selection, error) {
+func (r Registry) Create(name string, cfg config.ProviderConfig, effective ...config.Config) (Selection, error) {
+	base := config.Defaults()
+	if len(effective) > 0 {
+		base = effective[0]
+	}
+	base.Provider = name
+	if base.Providers == nil {
+		base.Providers = map[string]config.ProviderConfig{}
+	}
+	base.Providers[name] = cfg
 	return r.selectNamed(name, SelectOptions{
-		Config: config.Config{Provider: name, Providers: map[string]config.ProviderConfig{name: cfg}},
+		Config: base,
 		Getenv: os.Getenv,
 	})
 }

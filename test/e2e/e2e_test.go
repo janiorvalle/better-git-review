@@ -94,6 +94,52 @@ func TestHTMLHappyPathAndSelfContainment(t *testing.T) {
 	assertSelfContained(t, html)
 }
 
+func TestConfigThresholdsAreInjectedIntoArtifact(t *testing.T) {
+	env := isolatedEnvironment(t)
+	writeE2EConfig(t, env, "[viewer]\ncollapse_threshold = 17\nfold_threshold = 23\n")
+	output := filepath.Join(t.TempDir(), "configured.html")
+	result := runCLI(t, env, nil, "--diff", viewerFixturePath(t), "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(data)
+	for _, expected := range []string{`"collapseThreshold":17`, `"foldThreshold":23`} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("artifact missing %s", expected)
+		}
+	}
+}
+
+func TestBrowserEnvironmentIsHonored(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell browser helper is Unix-only")
+	}
+	env := isolatedEnvironment(t)
+	marker := filepath.Join(t.TempDir(), "browser-argument")
+	helper := filepath.Join(t.TempDir(), "browser")
+	script := "#!/bin/sh\nprintf '%s' \"$1\" > " + shellQuote(marker) + "\n"
+	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env = setEnv(env, "BROWSER", helper)
+	output := filepath.Join(t.TempDir(), "opened.html")
+	result := runCLI(t, env, nil, "--diff", fixturePath(t), "--provider", "mock", "--out", output, "--open")
+	if result.err != nil {
+		t.Fatalf("command failed: %v\n%s", result.err, result.stderr)
+	}
+	argument, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(argument) != output {
+		t.Fatalf("$BROWSER argument = %q, want %q", argument, output)
+	}
+}
+
 func TestHTMLHostilePatchIsInert(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "hostile.html")
 	result := runCLI(t, isolatedEnvironment(t), nil,
@@ -228,6 +274,16 @@ func TestStagedCostGuard(t *testing.T) {
 	if calls := strings.Count(string(log), "----- MOCK PROMPT -----"); calls != 10 {
 		t.Fatalf("actual calls = %d, guard planned 10", calls)
 	}
+}
+
+func TestSummaryBatchConfigChangesGuardPlan(t *testing.T) {
+	env := isolatedEnvironment(t)
+	writeE2EConfig(t, env, "[analysis]\nsummary_batch_max_files = 5\n")
+	output := filepath.Join(t.TempDir(), "guard.json")
+	result := runCLI(t, env, nil,
+		"--diff", manyFilesFixturePath(t, 151), "--provider", "mock",
+		"--format", "json", "--out", output)
+	assertFailureContains(t, result, "fixed plan has exactly 34 model calls")
 }
 
 func TestBarelyStagedSmallFilesUseFullFidelity(t *testing.T) {
@@ -1289,6 +1345,21 @@ func envConfigHome(env []string) string {
 		return envValue(env, "APPDATA")
 	}
 	return envValue(env, "XDG_CONFIG_HOME")
+}
+
+func writeE2EConfig(t *testing.T, env []string, content string) {
+	t.Helper()
+	path := filepath.Join(envConfigHome(env), "better-git-review", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func initializeRepo(t *testing.T) string {

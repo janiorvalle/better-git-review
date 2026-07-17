@@ -26,7 +26,11 @@ func AnalysisPlan(calls int, provider, model, reasoning string) Plan {
 }
 
 func Confirm(plan Plan, yes bool, input io.Reader, output io.Writer, inputIsTTY bool) error {
-	if plan.Calls <= CallThreshold {
+	return ConfirmWithThreshold(plan, CallThreshold, yes, input, output, inputIsTTY)
+}
+
+func ConfirmWithThreshold(plan Plan, threshold int, yes bool, input io.Reader, output io.Writer, inputIsTTY bool) error {
+	if plan.Calls <= threshold {
 		return nil
 	}
 	model := plan.Model
@@ -39,7 +43,7 @@ func Confirm(plan Plan, yes bool, input io.Reader, output io.Writer, inputIsTTY 
 		return nil
 	}
 	if !inputIsTTY {
-		return fmt.Errorf("this run needs more than %d model calls - add --yes to approve the spend", CallThreshold)
+		return fmt.Errorf("this run needs more than %d model calls - add --yes to approve the spend", threshold)
 	}
 	fmt.Fprint(output, "Continue? [y/N] ")
 	reader, ok := input.(*bufio.Reader)

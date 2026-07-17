@@ -168,3 +168,136 @@ func TestTrustChangeDetection(t *testing.T) {
 		t.Fatal("changed repo config should require trust again")
 	}
 }
+
+func TestValidationNamesEveryInvalidKey(t *testing.T) {
+	tests := []struct {
+		key string
+		bad func(*Config)
+	}{
+		{"analysis.summary_batch_max_files", func(c *Config) { c.Analysis.SummaryBatchMaxFiles = 0 }},
+		{"analysis.stage_concurrency", func(c *Config) { c.Analysis.StageConcurrency = -1 }},
+		{"analysis.staging_max_files", func(c *Config) { c.Analysis.StagingMaxFiles = 9 }},
+		{"viewer.fold_threshold", func(c *Config) { c.Viewer.FoldThreshold = 0 }},
+		{"viewer.word_diff_min_similarity", func(c *Config) { c.Viewer.WordDiffMinSimilarity = 1.1 }},
+		{"media.max_preview_bytes", func(c *Config) { c.Media.MaxPreviewBytes = 0 }},
+		{"media.image_extensions", func(c *Config) { c.Media.ImageExtensions = []string{".avif"} }},
+		{"git.context_lines", func(c *Config) { c.Git.ContextLines = -1 }},
+		{"git.find_renames", func(c *Config) { c.Git.FindRenames = 101 }},
+		{"github.list_limit", func(c *Config) { c.GitHub.ListLimit = 0 }},
+		{"network.provider_exec_timeout_seconds", func(c *Config) { c.Network.ProviderExecTimeoutSeconds = 0 }},
+		{"cache.max_entries", func(c *Config) { c.Cache.MaxEntries = -1 }},
+	}
+	for _, test := range tests {
+		t.Run(test.key, func(t *testing.T) {
+			cfg := Defaults()
+			test.bad(&cfg)
+			err := Validate(cfg)
+			if err == nil || !strings.Contains(err.Error(), test.key) {
+				t.Fatalf("error = %v, want offending key %q", err, test.key)
+			}
+		})
+	}
+}
+
+func TestRepoConfigOnlyAppliesViewerMediaAndAutoOpen(t *testing.T) {
+	temp := t.TempDir()
+	repoPath := filepath.Join(temp, "repo.toml")
+	if err := os.WriteFile(repoPath, []byte(`
+auto_open = false
+[viewer]
+fold_threshold = 22
+word_diff_min_similarity = 0
+[media]
+max_preview_bytes = 99
+[analysis]
+summary_batch_max_files = 7
+[cache]
+max_entries = 2
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	loaded, err := Load(LoadOptions{
+		RepoDir: temp, UserConfigPath: filepath.Join(temp, "missing"), RepoConfigPath: repoPath,
+		TrustPath: filepath.Join(temp, "trust"), Input: bytes.NewBuffer(nil), Output: &output,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Config.Viewer.FoldThreshold != 22 || loaded.Config.Viewer.WordDiffMinSimilarity != 0 ||
+		loaded.Config.Media.MaxPreviewBytes != 99 || loaded.Config.AutoOpen == nil || *loaded.Config.AutoOpen {
+		t.Fatalf("allowed repo settings not applied: %#v", loaded.Config)
+	}
+	if loaded.Config.Analysis.SummaryBatchMaxFiles != 25 || loaded.Config.Cache.MaxEntries != 200 {
+		t.Fatalf("restricted settings applied: %#v", loaded.Config)
+	}
+	for _, key := range []string{"[analysis]", "[cache]"} {
+		if !strings.Contains(output.String(), key) {
+			t.Fatalf("missing warning for %s: %s", key, output.String())
+		}
+	}
+}
+
+func TestAnalysisFingerprintIncludesAnalysisAndGitOnly(t *testing.T) {
+	base := Defaults()
+	original, _ := AnalysisFingerprint(base)
+	analysis := base
+	analysis.Analysis.SummaryBatchMaxFiles++
+	changed, _ := AnalysisFingerprint(analysis)
+	if changed == original {
+		t.Fatal("analysis change did not affect fingerprint")
+	}
+	git := base
+	git.Git.ContextLines = 4
+	changed, _ = AnalysisFingerprint(git)
+	if changed == original {
+		t.Fatal("git change did not affect fingerprint")
+	}
+	viewer := base
+	viewer.Viewer.FoldThreshold++
+	viewer.Media.MaxPreviewBytes++
+	unchanged, _ := AnalysisFingerprint(viewer)
+	if unchanged != original {
+		t.Fatal("viewer/media change affected analysis fingerprint")
+	}
+}
+
+func TestRepoMediaLimitsCanTightenButNotRaiseUserLimits(t *testing.T) {
+	temp := t.TempDir()
+	userPath := filepath.Join(temp, "user.toml")
+	repoPath := filepath.Join(temp, "repo.toml")
+	if err := os.WriteFile(userPath, []byte("[media]\nmax_preview_bytes = 100\nmax_total_preview_bytes = 1000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(repoPath, []byte("[media]\nmax_preview_bytes = 9999\nmax_total_preview_bytes = 10\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(LoadOptions{
+		RepoDir: temp, UserConfigPath: userPath, RepoConfigPath: repoPath,
+		TrustPath: filepath.Join(temp, "trust"), Output: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Config.Media.MaxPreviewBytes != 100 || loaded.Config.Media.MaxTotalPreviewBytes != 10 {
+		t.Fatalf("repo media limits = %#v", loaded.Config.Media)
+	}
+}
+
+func TestValidationRejectsUnknownThemesAndImpossibleFoldContext(t *testing.T) {
+	cfg := Defaults()
+	cfg.Viewer.ThemeLight = "not-a-theme"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "viewer.theme_light") {
+		t.Fatalf("theme error = %v", err)
+	}
+	cfg = Defaults()
+	cfg.Viewer.FoldContext = 6
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "viewer.fold_context") {
+		t.Fatalf("fold error = %v", err)
+	}
+	cfg = Defaults()
+	cfg.Viewer.FoldContext = int(^uint(0) >> 1)
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "viewer.fold_context") {
+		t.Fatalf("overflow-safe fold error = %v", err)
+	}
+}

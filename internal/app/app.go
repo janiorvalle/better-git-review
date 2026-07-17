@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/shlex"
 	"github.com/janiorvalle/better-git-review/internal/analyze"
 	"github.com/janiorvalle/better-git-review/internal/blame"
 	"github.com/janiorvalle/better-git-review/internal/cache"
@@ -132,6 +133,7 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	if opts.Interactive {
 		selected, pickErr := picker.Run(ctx, picker.Options{
 			RepoDir: repoRoot, Query: opts.PickerQuery, Input: env.Stdin, Output: env.Stderr,
+			ListLimit: loadedConfig.Config.GitHub.ListLimit,
 		})
 		if errors.Is(pickErr, picker.ErrQuit) {
 			return nil
@@ -141,12 +143,12 @@ func Run(ctx context.Context, args []string, env Environment) error {
 		}
 		opts = applyPickerSelection(opts, selected)
 	}
-	collected, err := collectStage(ctx, opts, repoRoot, env, progress.Logf, defaultSourceRegistry())
+	collected, err := collectStage(ctx, opts, repoRoot, env, progress.Logf, defaultSourceRegistry(), loadedConfig.Config)
 	if err != nil {
 		return err
 	}
 	if len(bytes.TrimSpace(collected.Diff)) == 0 && stdinIsTTY && !opts.Interactive && !hasExplicitSource(opts) {
-		selected, pickErr := picker.Run(ctx, picker.Options{RepoDir: repoRoot, Input: env.Stdin, Output: env.Stderr})
+		selected, pickErr := picker.Run(ctx, picker.Options{RepoDir: repoRoot, Input: env.Stdin, Output: env.Stderr, ListLimit: loadedConfig.Config.GitHub.ListLimit})
 		if errors.Is(pickErr, picker.ErrQuit) {
 			return nil
 		}
@@ -154,7 +156,7 @@ func Run(ctx context.Context, args []string, env Environment) error {
 			return pickErr
 		}
 		opts = applyPickerSelection(opts, selected)
-		collected, err = collectStage(ctx, opts, repoRoot, env, progress.Logf, defaultSourceRegistry())
+		collected, err = collectStage(ctx, opts, repoRoot, env, progress.Logf, defaultSourceRegistry(), loadedConfig.Config)
 		if err != nil {
 			return err
 		}
@@ -170,15 +172,15 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	}
 
 	result, err := analyzeWithCacheStage(ctx, analyzeStageInput{
-		Options:        opts,
-		Env:            env,
-		Collected:      collected,
-		Files:          files,
-		Selection:      selection,
-		Getenv:         os.Getenv,
-		InputIsTTY:     stdinIsTTY,
-		Progress:       progress,
-		ProviderConfig: loadedConfig.Config.Providers[loadedConfig.Config.Provider],
+		Options:    opts,
+		Env:        env,
+		Collected:  collected,
+		Files:      files,
+		Selection:  selection,
+		Getenv:     os.Getenv,
+		InputIsTTY: stdinIsTTY,
+		Progress:   progress,
+		Config:     loadedConfig.Config,
 	})
 	if err != nil {
 		return err
@@ -192,12 +194,12 @@ func Run(ctx context.Context, args []string, env Environment) error {
 	// before rendering so monster patch inputs do not remain live alongside
 	// the complete HTML artifact.
 	collected.Diff = nil
-	if err := renderAndEmitStage(ctx, outputPath, opts.Format, result, collected); err != nil {
+	if err := renderAndEmitStage(ctx, outputPath, opts.Format, result, collected, loadedConfig.Config); err != nil {
 		return err
 	}
 	opened := false
 	if shouldOpen(opts, loadedConfig.Config, stderrIsTTY) {
-		opened = openBrowser(outputPath)
+		opened = openBrowser(outputPath, loadedConfig.Config.Browser.Command, os.Getenv)
 	}
 	progress.Wrote(outputPath, opened)
 	return nil
@@ -210,17 +212,20 @@ func collectStage(
 	env Environment,
 	log func(string, ...any),
 	registry source.Registry,
+	cfg config.Config,
 ) (source.Result, error) {
 	return registry.Collect(ctx, source.Options{
-		PR:       opts.PR,
-		DiffFile: opts.DiffFile,
-		Base:     opts.Base,
-		Head:     opts.Head,
-		Commit:   opts.Commit,
-		Dirty:    opts.Dirty,
-		RepoDir:  repoRoot,
-		Stdin:    env.Stdin,
-		Logf:     log,
+		PR:              opts.PR,
+		DiffFile:        opts.DiffFile,
+		Base:            opts.Base,
+		Head:            opts.Head,
+		Commit:          opts.Commit,
+		Dirty:           opts.Dirty,
+		RepoDir:         repoRoot,
+		Stdin:           env.Stdin,
+		Logf:            log,
+		GitContextLines: cfg.Git.ContextLines, GitFindRenames: cfg.Git.FindRenames,
+		GitHubPRDiffMaxFiles: cfg.GitHub.PRDiffMaxFiles,
 	})
 }
 
@@ -261,32 +266,34 @@ func selectStage(
 }
 
 type analyzeStageInput struct {
-	Options        options
-	Env            Environment
-	Collected      source.Result
-	Files          []document.File
-	Selection      provider.Selection
-	Getenv         func(string) string
-	InputIsTTY     bool
-	Progress       *terminal.Progress
-	ProviderConfig config.ProviderConfig
+	Options    options
+	Env        Environment
+	Collected  source.Result
+	Files      []document.File
+	Selection  provider.Selection
+	Getenv     func(string) string
+	InputIsTTY bool
+	Progress   *terminal.Progress
+	Config     config.Config
 }
 
 func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (document.Document, error) {
 	providerBudget := provider.AnalysisBudget(ctx, input.Selection.Provider)
-	if input.ProviderConfig.AnalysisBudget > 0 {
-		providerBudget = input.ProviderConfig.AnalysisBudget
+	providerConfig := input.Config.Providers[input.Config.Provider]
+	if providerConfig.AnalysisBudget > 0 {
+		providerBudget = providerConfig.AnalysisBudget
 	}
-	stageDecision, err := analyze.DecideStaging(input.Files, input.Getenv, providerBudget)
+	settings := analysisSettings(input.Config)
+	stageDecision, err := analyze.DecideStagingWithSettings(input.Files, input.Getenv, settings, providerBudget)
 	if err != nil {
 		return document.Document{}, err
 	}
 	plannedCalls := 1
 	var stagedPlan *analyze.StagedPlan
 	if stageDecision.Staged {
-		if len(input.Files) > analyze.CohortMaxFiles && stageDecision.InputBytes <= stageDecision.Budget {
+		if len(input.Files) > settings.StagingMaxFiles && stageDecision.InputBytes <= stageDecision.Budget {
 			input.Progress.Logf("big diff - %d files exceeds the %d-file single-pass output limit, using staged analysis",
-				len(input.Files), analyze.CohortMaxFiles)
+				len(input.Files), settings.StagingMaxFiles)
 		} else {
 			input.Progress.Logf("big diff - roughly %.1fx the %d-char model budget, using staged analysis",
 				float64(stageDecision.InputBytes)/float64(stageDecision.Budget), stageDecision.Budget)
@@ -303,7 +310,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 			nil,
 			input.Progress.Logf,
 		)
-		plan := analyze.PlanStaged(input.Files, generated, input.Options.IncludeMechanical, stageDecision.Budget)
+		plan := analyze.PlanStagedWithSettings(input.Files, generated, input.Options.IncludeMechanical, stageDecision.Budget, settings)
 		stagedPlan = &plan
 		plannedCalls = plan.Calls
 		input.Progress.Logf(
@@ -312,7 +319,11 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 		)
 	}
 
-	cacheStore, err := cache.Default(validateCachedDocument)
+	cacheStore, err := cache.Default(validateCachedDocument, input.Config.Cache.MaxEntries)
+	if err != nil {
+		return document.Document{}, err
+	}
+	analysisFingerprint, err := config.AnalysisFingerprint(input.Config)
 	if err != nil {
 		return document.Document{}, err
 	}
@@ -324,6 +335,7 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 		document.SchemaVersion,
 		fmt.Sprintf("budget=%d", stageDecision.Budget),
 		fmt.Sprintf("include-mechanical=%t", input.Options.IncludeMechanical),
+		"analysis-config="+analysisFingerprint,
 		fmt.Sprintf("mechanical=%v", func() []int {
 			if stagedPlan == nil {
 				return nil
@@ -343,13 +355,14 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 	}
 	if result.SchemaVersion == 0 {
 		analysisPerformed = true
-		if err := guard.Confirm(
+		if err := guard.ConfirmWithThreshold(
 			guard.AnalysisPlan(
 				plannedCalls,
 				input.Selection.Provider.Name(),
 				input.Selection.Model,
 				input.Selection.Reasoning,
 			),
+			input.Config.Analysis.GuardCallThreshold,
 			input.Options.Yes,
 			input.Env.Stdin,
 			input.Env.Stderr,
@@ -366,9 +379,10 @@ func analyzeWithCacheStage(ctx context.Context, input analyzeStageInput) (docume
 			Progress: func(completed, total int) {
 				spinner.Update(fmt.Sprintf("summarizing %d/%d ...", completed, total))
 			},
-			Staged: stageDecision.Staged,
-			Budget: stageDecision.Budget,
-			Plan:   stagedPlan,
+			Staged:   stageDecision.Staged,
+			Budget:   stageDecision.Budget,
+			Plan:     stagedPlan,
+			Settings: settings,
 		})
 		analysisDuration := spinner.Stop()
 		if analysisErr != nil {
@@ -423,6 +437,10 @@ func renderStage(format string, value document.Document) ([]byte, error) {
 }
 
 func renderStageWithSource(ctx context.Context, format string, value document.Document, collected source.Result) ([]byte, error) {
+	return renderStageWithConfig(ctx, format, value, collected, config.Defaults())
+}
+
+func renderStageWithConfig(ctx context.Context, format string, value document.Document, collected source.Result, cfg config.Config) ([]byte, error) {
 	if format == "json" {
 		encoded, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
@@ -430,11 +448,11 @@ func renderStageWithSource(ctx context.Context, format string, value document.Do
 		}
 		return append(encoded, '\n'), nil
 	}
-	previews := media.Enrich(ctx, value.Files, media.Source{
+	previews := media.EnrichWithSettings(ctx, value.Files, media.Source{
 		RepoDir: collected.Source.RepoDir, BaseRef: collected.BaseRef,
 		HeadRef: collected.HeadRef, Dirty: collected.Dirty,
-	}, nil)
-	return viewer.RenderWithPreviews(value, previews)
+	}, nil, mediaSettings(cfg))
+	return viewer.RenderWithPreviewsAndSettings(value, previews, viewerSettings(cfg))
 }
 
 func outputPath(opts options, sourceName string) (string, error) {
@@ -454,20 +472,21 @@ func renderAndEmitStage(
 	path, format string,
 	value document.Document,
 	collected source.Result,
+	cfg config.Config,
 ) error {
 	if format == "json" {
-		content, err := renderStageWithSource(ctx, format, value, collected)
+		content, err := renderStageWithConfig(ctx, format, value, collected, cfg)
 		if err != nil {
 			return err
 		}
 		return emitStage(path, content)
 	}
-	previews := media.Enrich(ctx, value.Files, media.Source{
+	previews := media.EnrichWithSettings(ctx, value.Files, media.Source{
 		RepoDir: collected.Source.RepoDir, BaseRef: collected.BaseRef,
 		HeadRef: collected.HeadRef, Dirty: collected.Dirty,
-	}, nil)
+	}, nil, mediaSettings(cfg))
 	return writeOutputWith(path, func(output io.Writer) error {
-		return viewer.RenderToWithPreviews(output, value, previews)
+		return viewer.RenderToWithPreviewsAndSettings(output, value, previews, viewerSettings(cfg))
 	})
 }
 
@@ -639,8 +658,12 @@ func writeOutputWith(path string, write func(io.Writer) error) error {
 	return nil
 }
 
-func openBrowser(path string) bool {
-	name, args, ok := browserCommand(runtime.GOOS, path)
+func openBrowser(path, configured string, getenv func(string) string) bool {
+	browser := configured
+	if browser == "" && getenv != nil {
+		browser = getenv("BROWSER")
+	}
+	name, args, ok := browserCommand(runtime.GOOS, path, browser)
 	if !ok {
 		return false
 	}
@@ -648,7 +671,21 @@ func openBrowser(path string) bool {
 	return command.Run() == nil
 }
 
-func browserCommand(goos, path string) (string, []string, bool) {
+func browserCommand(goos, path string, configured ...string) (string, []string, bool) {
+	if len(configured) > 0 && strings.TrimSpace(configured[0]) != "" {
+		if goos == "windows" {
+			parts, err := splitWindowsCommandLine(configured[0])
+			if err != nil || len(parts) == 0 {
+				return "", nil, false
+			}
+			return parts[0], append(parts[1:], path), true
+		}
+		parts, err := shlex.Split(configured[0])
+		if err != nil || len(parts) == 0 {
+			return "", nil, false
+		}
+		return parts[0], append(parts[1:], path), true
+	}
 	switch goos {
 	case "darwin":
 		return "open", []string{path}, true
@@ -658,6 +695,80 @@ func browserCommand(goos, path string) (string, []string, bool) {
 		return "rundll32", []string{"url.dll,FileProtocolHandler", path}, true
 	default:
 		return "", nil, false
+	}
+}
+
+// splitWindowsCommandLine follows the backslash-and-quote rules used by
+// CommandLineToArgvW without requiring a Windows-only syscall at build time.
+func splitWindowsCommandLine(value string) ([]string, error) {
+	var result []string
+	for index := 0; index < len(value); {
+		for index < len(value) && (value[index] == ' ' || value[index] == '\t') {
+			index++
+		}
+		if index == len(value) {
+			break
+		}
+		var argument strings.Builder
+		quoted := false
+		for index < len(value) {
+			if !quoted && (value[index] == ' ' || value[index] == '\t') {
+				break
+			}
+			backslashes := 0
+			for index < len(value) && value[index] == '\\' {
+				backslashes++
+				index++
+			}
+			if index < len(value) && value[index] == '"' {
+				argument.WriteString(strings.Repeat(`\`, backslashes/2))
+				if backslashes%2 == 1 {
+					argument.WriteByte('"')
+				} else {
+					quoted = !quoted
+				}
+				index++
+				continue
+			}
+			argument.WriteString(strings.Repeat(`\`, backslashes))
+			if index < len(value) {
+				argument.WriteByte(value[index])
+				index++
+			}
+		}
+		if quoted {
+			return nil, fmt.Errorf("unterminated quote")
+		}
+		result = append(result, argument.String())
+	}
+	return result, nil
+}
+
+func analysisSettings(cfg config.Config) analyze.Settings {
+	value := cfg.Analysis
+	return analyze.Settings{
+		SummaryBatchMaxFiles: value.SummaryBatchMaxFiles, StageConcurrency: value.StageConcurrency,
+		DigestMaxFiles: value.DigestMaxFiles, DigestMaxChars: value.DigestMaxChars,
+		FileDiffCap: value.FileDiffCap, StagingMaxFiles: value.StagingMaxFiles,
+	}
+}
+
+func viewerSettings(cfg config.Config) viewer.Settings {
+	value := cfg.Viewer
+	return viewer.Settings{
+		CollapseThreshold: value.CollapseThreshold, FoldThreshold: value.FoldThreshold,
+		FoldContext: value.FoldContext, LongLineThreshold: value.LongLineThreshold,
+		KeySymbolCap: value.KeySymbolCap, WordDiffMinSimilarity: value.WordDiffMinSimilarity,
+		ThemeLight: value.ThemeLight, ThemeDark: value.ThemeDark,
+		FidelityBudget: cfg.Analysis.FidelityBudget,
+	}
+}
+
+func mediaSettings(cfg config.Config) media.Settings {
+	return media.Settings{
+		MaxPreviewBytes:      cfg.Media.MaxPreviewBytes,
+		MaxTotalPreviewBytes: cfg.Media.MaxTotalPreviewBytes,
+		ImageExtensions:      append([]string(nil), cfg.Media.ImageExtensions...),
 	}
 }
 

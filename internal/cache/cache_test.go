@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
@@ -23,6 +24,49 @@ func TestKeyChangesForEveryInput(t *testing.T) {
 		if value == base {
 			t.Fatal("key input did not affect key")
 		}
+	}
+}
+
+func TestStorePrunesOldestModificationTime(t *testing.T) {
+	dir := t.TempDir()
+	store := Cache{Dir: dir, MaxEntries: 2}
+	keys := []string{
+		Key([]byte("old"), "mock", "", "", 1),
+		Key([]byte("middle"), "mock", "", "", 1),
+		Key([]byte("new"), "mock", "", "", 1),
+	}
+	for index, key := range keys {
+		if err := store.Store(key, document.Document{SchemaVersion: document.SchemaVersion}); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, key+".json")
+		when := time.Unix(int64(index+1), 0)
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, keys[0]+".json")); !os.IsNotExist(err) {
+		t.Fatalf("oldest entry was not pruned: %v", err)
+	}
+	for _, key := range keys[1:] {
+		if _, err := os.Stat(filepath.Join(dir, key+".json")); err != nil {
+			t.Fatalf("%s entry missing: %v", key, err)
+		}
+	}
+}
+
+func TestPruneIgnoresInProgressFiles(t *testing.T) {
+	dir := t.TempDir()
+	temp := filepath.Join(dir, ".cache-in-progress.json")
+	if err := os.WriteFile(temp, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := Cache{Dir: dir, MaxEntries: 1}
+	if err := store.Store(Key([]byte("done"), "mock", "", "", 1), document.Document{SchemaVersion: document.SchemaVersion}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(temp); err != nil {
+		t.Fatalf("in-progress file was pruned: %v", err)
 	}
 }
 

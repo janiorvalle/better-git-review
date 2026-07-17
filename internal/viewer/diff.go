@@ -67,7 +67,11 @@ type linePair struct {
 const changedSpanMinSimilarity = 0.5
 
 func ChangedSpans(oldText, newText string) (Span, Span, bool) {
-	if isLongLine(oldText) || isLongLine(newText) {
+	return ChangedSpansWithSettings(oldText, newText, DefaultSettings())
+}
+
+func ChangedSpansWithSettings(oldText, newText string, settings Settings) (Span, Span, bool) {
+	if isLongLineWithThreshold(oldText, settings.LongLineThreshold) || isLongLineWithThreshold(newText, settings.LongLineThreshold) {
 		return Span{}, Span{}, false
 	}
 	oldRunes := []rune(oldText)
@@ -90,7 +94,7 @@ func ChangedSpans(oldText, newText string) (Span, Span, bool) {
 	// other. (Whitespace-only lines are trivially similar.)
 	commonContent := countNonSpace(oldRunes[:prefix]) + countNonSpace(oldRunes[len(oldRunes)-suffix:])
 	shorterContent := min(countNonSpace(oldRunes), countNonSpace(newRunes))
-	if shorterContent > 0 && float64(commonContent)/float64(shorterContent) < changedSpanMinSimilarity {
+	if shorterContent > 0 && float64(commonContent)/float64(shorterContent) < settings.WordDiffMinSimilarity {
 		return Span{}, Span{}, false
 	}
 
@@ -135,6 +139,10 @@ func countNonSpace(runes []rune) int {
 }
 
 func BuildRows(file document.File, fileIndex int) []UnifiedRow {
+	return BuildRowsWithSettings(file, fileIndex, DefaultSettings())
+}
+
+func BuildRowsWithSettings(file document.File, fileIndex int, settings Settings) []UnifiedRow {
 	highlighter := newHighlighter(file.Path)
 	var unified []UnifiedRow
 	for hunkIndex, hunk := range file.Hunks {
@@ -144,7 +152,7 @@ func BuildRows(file document.File, fileIndex int) []UnifiedRow {
 		header := hunkLabel(hunk)
 		unified = append(unified, UnifiedRow{Kind: "hunk", Header: header})
 
-		pairs := pairChangedLines(hunk.Lines)
+		pairs := pairChangedLinesWithSettings(hunk.Lines, settings)
 		startUnified := len(unified)
 		for lineIndex, line := range hunk.Lines {
 			var span *Span
@@ -161,8 +169,8 @@ func BuildRows(file document.File, fileIndex int) []UnifiedRow {
 				Old:      line.Old,
 				New:      line.New,
 				Prefix:   linePrefix(line.Type),
-				Code:     highlighter.highlight(line.Text, span),
-				LongLine: isLongLine(line.Text),
+				Code:     highlighter.highlightWithThreshold(line.Text, span, settings.LongLineThreshold),
+				LongLine: isLongLineWithThreshold(line.Text, settings.LongLineThreshold),
 			})
 		}
 		applyFolds(
@@ -174,6 +182,8 @@ func BuildRows(file document.File, fileIndex int) []UnifiedRow {
 				row.FoldID = foldID
 				row.FoldCount = foldCount
 			},
+			settings.FoldThreshold,
+			settings.FoldContext,
 		)
 
 	}
@@ -181,6 +191,10 @@ func BuildRows(file document.File, fileIndex int) []UnifiedRow {
 }
 
 func pairChangedLines(lines []document.HunkLine) map[int]linePair {
+	return pairChangedLinesWithSettings(lines, DefaultSettings())
+}
+
+func pairChangedLinesWithSettings(lines []document.HunkLine, settings Settings) map[int]linePair {
 	result := map[int]linePair{}
 	for index := 0; index < len(lines); {
 		if lines[index].Type != "d" {
@@ -203,10 +217,10 @@ func pairChangedLines(lines []document.HunkLine) map[int]linePair {
 		for offset := 0; offset < count; offset++ {
 			oldText := lines[deleteStart+offset].Text
 			newText := lines[addStart+offset].Text
-			if isLongLine(oldText) || isLongLine(newText) {
+			if isLongLineWithThreshold(oldText, settings.LongLineThreshold) || isLongLineWithThreshold(newText, settings.LongLineThreshold) {
 				continue
 			}
-			oldSpan, newSpan, changed := ChangedSpans(oldText, newText)
+			oldSpan, newSpan, changed := ChangedSpansWithSettings(oldText, newText, settings)
 			if !changed {
 				continue
 			}
@@ -223,7 +237,16 @@ func applyFolds[T any](
 	id string,
 	isContext func(T) bool,
 	mark func(*T, string, int),
+	thresholds ...int,
 ) {
+	foldThreshold := FoldThreshold
+	foldContext := DefaultSettings().FoldContext
+	if len(thresholds) > 0 {
+		foldThreshold = thresholds[0]
+	}
+	if len(thresholds) > 1 {
+		foldContext = thresholds[1]
+	}
 	for start := 0; start < len(rows); {
 		if !isContext(rows[start]) {
 			start++
@@ -233,8 +256,8 @@ func applyFolds[T any](
 		for end < len(rows) && isContext(rows[end]) {
 			end++
 		}
-		if end-start > FoldThreshold {
-			foldStart, foldEnd := start+3, end-3
+		if end-start > foldThreshold {
+			foldStart, foldEnd := start+foldContext, end-foldContext
 			foldCount := foldEnd - foldStart
 			for index := foldStart; index < foldEnd; index++ {
 				count := 0
@@ -319,7 +342,11 @@ func newHighlighter(path string) *syntaxHighlighter {
 }
 
 func (h *syntaxHighlighter) highlight(text string, span *Span) template.HTML {
-	if isLongLine(text) {
+	return h.highlightWithThreshold(text, span, LongLineThreshold)
+}
+
+func (h *syntaxHighlighter) highlightWithThreshold(text string, span *Span, threshold int) template.HTML {
+	if isLongLineWithThreshold(text, threshold) {
 		return template.HTML(template.HTMLEscapeString(text))
 	}
 	if span == nil || span.Start >= span.End {
@@ -355,10 +382,14 @@ func (h *syntaxHighlighter) highlightPart(text string) string {
 }
 
 func isLongLine(text string) bool {
-	if len(text) <= LongLineThreshold {
+	return isLongLineWithThreshold(text, LongLineThreshold)
+}
+
+func isLongLineWithThreshold(text string, threshold int) bool {
+	if len(text) <= threshold {
 		return false
 	}
-	return utf8.RuneCountInString(text) > LongLineThreshold
+	return utf8.RuneCountInString(text) > threshold
 }
 
 type ChromaTheme struct {

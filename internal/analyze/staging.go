@@ -13,14 +13,18 @@ type StageDecision struct {
 }
 
 func DecideStaging(files []document.File, getenv func(string) string, defaults ...int) (StageDecision, error) {
+	return DecideStagingWithSettings(files, getenv, DefaultSettings(), defaults...)
+}
+
+func DecideStagingWithSettings(files []document.File, getenv func(string) string, settings Settings, defaults ...int) (StageDecision, error) {
 	budget, overridden, err := stageBudget(getenv, defaults...)
 	if err != nil {
 		return StageDecision{}, err
 	}
 	inputBytes := AnalysisInputBytes(files)
-	staged := inputBytes > budget || len(files) > CohortMaxFiles
+	staged := inputBytes > budget || len(files) > settings.StagingMaxFiles
 	if staged {
-		minimum := minimumStagedBudget(files)
+		minimum := minimumStagedBudgetWithSettings(files, settings)
 		if budget < minimum {
 			if !overridden {
 				return StageDecision{}, fmt.Errorf(
@@ -41,6 +45,10 @@ func DecideStaging(files []document.File, getenv func(string) string, defaults .
 }
 
 func minimumStagedBudget(files []document.File) int {
+	return minimumStagedBudgetWithSettings(files, DefaultSettings())
+}
+
+func minimumStagedBudgetWithSettings(files []document.File, settings Settings) int {
 	maxHeader := 0
 	for index, file := range files {
 		maxHeader = max(maxHeader, len(fileHeader(index, file)))
@@ -51,7 +59,7 @@ func minimumStagedBudget(files []document.File) int {
 		End:   "END_UNTRUSTED_0000000000000000",
 	}
 	minimum = max(minimum, synthesisPromptOverheadChars(delimiters))
-	for _, cohort := range PlanCohorts(files) {
+	for _, cohort := range PlanCohortsWithMax(files, settings.StagingMaxFiles) {
 		minimum = max(minimum, len(BuildCohortNarrationPrompt(cohort, "", delimiters)))
 	}
 	return minimum

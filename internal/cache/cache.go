@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
 	"github.com/janiorvalle/better-git-review/internal/xdg"
@@ -15,8 +17,9 @@ import (
 type Validator func(document.Document) error
 
 type Cache struct {
-	Dir      string
-	Validate Validator
+	Dir        string
+	Validate   Validator
+	MaxEntries int
 }
 
 func Key(diff []byte, providerName, model, reasoning string, schemaVersion int, variants ...string) string {
@@ -36,12 +39,16 @@ func Key(diff []byte, providerName, model, reasoning string, schemaVersion int, 
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func Default(validate Validator) (Cache, error) {
+func Default(validate Validator, maxEntries ...int) (Cache, error) {
 	cacheDir, err := xdg.CacheDir()
 	if err != nil {
 		return Cache{}, err
 	}
-	return Cache{Dir: cacheDir, Validate: validate}, nil
+	maximum := 200
+	if len(maxEntries) > 0 {
+		maximum = maxEntries[0]
+	}
+	return Cache{Dir: cacheDir, Validate: validate, MaxEntries: maximum}, nil
 }
 
 func (c Cache) Load(key string) (document.Document, bool) {
@@ -100,5 +107,56 @@ func (c Cache) Store(key string, value document.Document) error {
 	if err := os.Rename(tempName, filepath.Join(c.Dir, key+".json")); err != nil {
 		return err
 	}
+	return c.prune()
+}
+
+func (c Cache) prune() error {
+	if c.MaxEntries == 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(c.Dir)
+	if err != nil {
+		return err
+	}
+	type candidate struct {
+		path    string
+		modTime int64
+	}
+	var files []candidate
+	for _, entry := range entries {
+		if entry.IsDir() || !isFinalEntry(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		files = append(files, candidate{
+			path: filepath.Join(c.Dir, entry.Name()), modTime: info.ModTime().UnixNano(),
+		})
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].modTime != files[j].modTime {
+			return files[i].modTime < files[j].modTime
+		}
+		return files[i].path < files[j].path
+	})
+	for len(files) > c.MaxEntries {
+		if err := os.Remove(files[0].path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		files = files[1:]
+	}
 	return nil
+}
+
+func isFinalEntry(name string) bool {
+	if len(name) != 64+len(".json") || filepath.Ext(name) != ".json" {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimSuffix(name, ".json"))
+	return err == nil
 }

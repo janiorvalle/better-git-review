@@ -27,6 +27,16 @@ const (
 	MaxTotalPreviewBytes = 12 * 1024 * 1024
 )
 
+type Settings struct {
+	MaxPreviewBytes      int64
+	MaxTotalPreviewBytes int64
+	ImageExtensions      []string
+}
+
+func DefaultSettings() Settings {
+	return Settings{MaxPreviewBytes, MaxTotalPreviewBytes, []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}}
+}
+
 type Source struct {
 	RepoDir string
 	BaseRef string
@@ -49,6 +59,10 @@ type Preview struct {
 }
 
 func Enrich(ctx context.Context, files []document.File, source Source, runner gitexec.Runner) map[int]Preview {
+	return EnrichWithSettings(ctx, files, source, runner, DefaultSettings())
+}
+
+func EnrichWithSettings(ctx context.Context, files []document.File, source Source, runner gitexec.Runner, settings Settings) map[int]Preview {
 	result := map[int]Preview{}
 	if runner == nil {
 		runner = gitexec.ExecRunner{}
@@ -59,12 +73,12 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 			baseRef = strings.TrimSpace(string(merged))
 		}
 	}
-	remainingPreviewBytes := int64(MaxTotalPreviewBytes)
+	remainingPreviewBytes := settings.MaxTotalPreviewBytes
 	for index, file := range files {
 		if !file.Binary {
 			continue
 		}
-		imageFile := isImage(file.Path)
+		imageFile := isImageWithExtensions(file.Path, settings.ImageExtensions)
 		if source.RepoDir == "" {
 			label := "Binary file \u00b7 content not available from patch input."
 			if imageFile {
@@ -75,15 +89,15 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 		}
 		var oldAsset *Asset
 		if file.Status != "added" {
-			oldAsset = loadGitAsset(ctx, source.RepoDir, baseRef, file.OldPath, runner, imageFile, remainingPreviewBytes)
+			oldAsset = loadGitAsset(ctx, source.RepoDir, baseRef, file.OldPath, runner, imageFile, remainingPreviewBytes, settings.MaxPreviewBytes)
 			remainingPreviewBytes -= embeddedBytes(oldAsset)
 		}
 		var newAsset *Asset
 		if file.Status != "deleted" {
 			if source.Dirty {
-				newAsset = loadWorktreeAsset(source.RepoDir, file.NewPath, imageFile, remainingPreviewBytes)
+				newAsset = loadWorktreeAsset(source.RepoDir, file.NewPath, imageFile, remainingPreviewBytes, settings.MaxPreviewBytes)
 			} else {
-				newAsset = loadGitAsset(ctx, source.RepoDir, source.HeadRef, file.NewPath, runner, imageFile, remainingPreviewBytes)
+				newAsset = loadGitAsset(ctx, source.RepoDir, source.HeadRef, file.NewPath, runner, imageFile, remainingPreviewBytes, settings.MaxPreviewBytes)
 			}
 			remainingPreviewBytes -= embeddedBytes(newAsset)
 		}
@@ -97,7 +111,11 @@ func Enrich(ctx context.Context, files []document.File, source Source, runner gi
 	return result
 }
 
-func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec.Runner, includeContent bool, contentBudget int64) *Asset {
+func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec.Runner, includeContent bool, contentBudget int64, limits ...int64) *Asset {
+	maxPreviewBytes := int64(MaxPreviewBytes)
+	if len(limits) > 0 {
+		maxPreviewBytes = limits[0]
+	}
 	if ref == "" || ref == "WORKTREE" || path == "" || path == "/dev/null" {
 		return nil
 	}
@@ -111,7 +129,7 @@ func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec
 		return nil
 	}
 	asset := &Asset{Size: size, SizeLabel: formatSize(size)}
-	if !includeContent || size > MaxPreviewBytes || size > contentBudget {
+	if !includeContent || size > maxPreviewBytes || size > contentBudget {
 		return asset
 	}
 	content, err := runner.Run(ctx, repoDir, "cat-file", "-p", spec)
@@ -122,7 +140,11 @@ func loadGitAsset(ctx context.Context, repoDir, ref, path string, runner gitexec
 	return asset
 }
 
-func loadWorktreeAsset(repoDir, path string, includeContent bool, contentBudget int64) *Asset {
+func loadWorktreeAsset(repoDir, path string, includeContent bool, contentBudget int64, limits ...int64) *Asset {
+	maxPreviewBytes := int64(MaxPreviewBytes)
+	if len(limits) > 0 {
+		maxPreviewBytes = limits[0]
+	}
 	fullPath, pathInfo, ok := safeWorktreePath(repoDir, path)
 	if !ok {
 		return nil
@@ -137,11 +159,11 @@ func loadWorktreeAsset(repoDir, path string, includeContent bool, contentBudget 
 		return nil
 	}
 	asset := &Asset{Size: info.Size(), SizeLabel: formatSize(info.Size())}
-	if !includeContent || info.Size() > MaxPreviewBytes || info.Size() > contentBudget {
+	if !includeContent || info.Size() > maxPreviewBytes || info.Size() > contentBudget {
 		return asset
 	}
-	content, err := io.ReadAll(io.LimitReader(file, MaxPreviewBytes+1))
-	if err != nil || len(content) > MaxPreviewBytes || int64(len(content)) != info.Size() {
+	content, err := io.ReadAll(io.LimitReader(file, maxPreviewBytes+1))
+	if err != nil || int64(len(content)) > maxPreviewBytes || int64(len(content)) != info.Size() {
 		return asset
 	}
 	fillImage(asset, path, content)
@@ -255,12 +277,17 @@ func formatDelta(delta int64) string {
 }
 
 func isImage(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
-		return true
-	default:
-		return false
+	return isImageWithExtensions(path, DefaultSettings().ImageExtensions)
+}
+
+func isImageWithExtensions(path string, extensions []string) bool {
+	extension := strings.ToLower(filepath.Ext(path))
+	for _, configured := range extensions {
+		if extension == strings.ToLower(configured) {
+			return true
+		}
 	}
+	return false
 }
 
 func imageMIME(path string) string {
