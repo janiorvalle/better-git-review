@@ -430,6 +430,14 @@ func buildChromaTheme(lightCSS, darkCSS string) ChromaTheme {
 		if !hasColor {
 			continue
 		}
+		// Per-line/per-fragment tokenization routinely lexes isolated
+		// punctuation as chroma's Error token. Style sheets paint Error as
+		// inverse text (white on red); with backgrounds stripped that
+		// leaves near-invisible text. Error carries no information here —
+		// let those tokens inherit the base text color instead.
+		if strings.HasSuffix(selector, ".err") || strings.HasSuffix(selector, ".chroma-err") {
+			continue
+		}
 		variable := "--chroma-" + strings.Trim(cssVarPattern.ReplaceAllString(selector, "-"), "-")
 		tokens.WriteString(selector)
 		tokens.WriteString(" {")
