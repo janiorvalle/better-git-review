@@ -19,25 +19,145 @@ func (Adapter) Name() string {
 	return "openrouter"
 }
 
-func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, error) {
-	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "anthropic/claude-sonnet-4.5")
+func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, string, []string, error) {
+	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "z-ai/glm-5.2")
+	reasoning := provider.ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "")
+	if err := provider.ValidateReasoning("openrouter", reasoning, openRouterReasoningLevels(model)...); err != nil {
+		return nil, "", "", nil, err
+	}
 	return &Client{
 		Model:     model,
+		Reasoning: reasoning,
 		APIKeyEnv: provider.DefaultString(opts.APIKeyEnv, "OPENROUTER_API_KEY"),
 		BaseURL:   provider.DefaultString(opts.BaseURL, "https://openrouter.ai/api/v1"),
 		Getenv:    opts.Getenv,
-	}, model, nil
+	}, model, reasoning, nil, nil
 }
 
 type Client struct {
-	Model      string
-	APIKeyEnv  string
-	BaseURL    string
-	Getenv     func(string) string
-	HTTPClient *http.Client
+	Model            string
+	Reasoning        string
+	APIKeyEnv        string
+	BaseURL          string
+	Getenv           func(string) string
+	HTTPClient       *http.Client
+	reasoningByModel map[string][]string
+	catalogLoaded    bool
 }
 
 func (p *Client) Name() string { return "openrouter" }
+
+func (p *Client) Models(ctx context.Context) ([]provider.ModelOption, error) {
+	p.catalogLoaded = false
+	p.reasoningByModel = nil
+	client := p.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(p.BaseURL, "/")+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return CuratedModels(), nil
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return CuratedModels(), nil
+	}
+	var payload struct {
+		Data []struct {
+			ID            string `json:"id"`
+			Name          string `json:"name"`
+			ContextLength int    `json:"context_length"`
+			Pricing       struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+			Reasoning struct {
+				SupportedEfforts json.RawMessage `json:"supported_efforts"`
+			} `json:"reasoning"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(&payload); err != nil {
+		return CuratedModels(), nil
+	}
+	result := make([]provider.ModelOption, 0, len(payload.Data))
+	p.reasoningByModel = map[string][]string{}
+	for _, model := range payload.Data {
+		if model.ID == "" {
+			continue
+		}
+		note := catalogNote(model.Pricing.Prompt, model.Pricing.Completion, model.ContextLength)
+		result = append(result, provider.ModelOption{
+			ID: model.ID, Label: provider.DefaultString(model.Name, model.ID), Note: note,
+			Default: model.ID == "z-ai/glm-5.2",
+		})
+		rawEfforts := model.Reasoning.SupportedEfforts
+		switch {
+		case len(rawEfforts) == 0:
+			// Omitted means this model does not expose effort selection.
+		case strings.TrimSpace(string(rawEfforts)) == "null":
+			p.reasoningByModel[model.ID] = gatewayReasoningLevels()
+		default:
+			var efforts []string
+			if json.Unmarshal(rawEfforts, &efforts) == nil && len(efforts) > 0 {
+				p.reasoningByModel[model.ID] = efforts
+			}
+		}
+	}
+	if len(result) == 0 {
+		return CuratedModels(), nil
+	}
+	p.catalogLoaded = true
+	return result, nil
+}
+
+func (p *Client) ReasoningLevels() []string {
+	if p.catalogLoaded {
+		return append([]string(nil), p.reasoningByModel[p.Model]...)
+	}
+	if levels := p.reasoningByModel[p.Model]; len(levels) > 0 {
+		return append([]string(nil), levels...)
+	}
+	return openRouterReasoningLevels(p.Model)
+}
+
+func (p *Client) SetCatalogModel(model string) { p.Model = model }
+
+func CuratedModels() []provider.ModelOption {
+	return []provider.ModelOption{
+		{ID: "z-ai/glm-5.2", Label: "GLM 5.2", Note: "recommended", Default: true},
+		{ID: "anthropic/claude-sonnet-4.5", Label: "Claude Sonnet 4.5", Note: "fallback"},
+	}
+}
+
+func openRouterReasoningLevels(model string) []string {
+	if model == "z-ai/glm-5.2" {
+		return []string{"xhigh", "high"}
+	}
+	return gatewayReasoningLevels()
+}
+
+func gatewayReasoningLevels() []string {
+	return []string{"max", "xhigh", "high", "medium", "low", "minimal", "none"}
+}
+
+func catalogNote(promptPrice, completionPrice string, contextLength int) string {
+	price := func(raw string) string {
+		var value float64
+		if _, err := fmt.Sscan(raw, &value); err != nil {
+			return "?"
+		}
+		return fmt.Sprintf("$%.2f", value*1_000_000)
+	}
+	context := fmt.Sprintf("%dk ctx", contextLength/1000)
+	if contextLength >= 1_000_000 {
+		context = fmt.Sprintf("%.1fM ctx", float64(contextLength)/1_000_000)
+	}
+	return fmt.Sprintf("%s/%s per M in/out, %s", price(promptPrice), price(completionPrice), context)
+}
 
 func (p *Client) Detect() (bool, string) {
 	if p.Getenv == nil {
@@ -71,6 +191,9 @@ func (p *Client) complete(ctx context.Context, prompt string, schema json.RawMes
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
+	}
+	if p.Reasoning != "" {
+		requestBody["reasoning"] = map[string]string{"effort": p.Reasoning}
 	}
 	if schema != nil {
 		requestBody["provider"] = map[string]any{

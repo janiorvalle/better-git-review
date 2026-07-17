@@ -9,8 +9,11 @@ import (
 )
 
 func TestMergePrecedence(t *testing.T) {
+	autoOpen := true
+	disableOpen := false
 	user := Config{
 		Provider: "claude-cli",
+		AutoOpen: &autoOpen,
 		Providers: map[string]ProviderConfig{
 			"claude-cli": {Model: "haiku"},
 			"openrouter": {Model: "user-model", APIKeyEnv: "USER_KEY"},
@@ -18,8 +21,9 @@ func TestMergePrecedence(t *testing.T) {
 	}
 	repo := Config{
 		Provider: "openrouter",
+		AutoOpen: &disableOpen,
 		Providers: map[string]ProviderConfig{
-			"openrouter": {Model: "repo-model", BaseURL: "https://repo.example"},
+			"openrouter": {Model: "repo-model", Reasoning: "high", BaseURL: "https://repo.example"},
 		},
 	}
 	got := Merge(user, repo)
@@ -28,8 +32,11 @@ func TestMergePrecedence(t *testing.T) {
 	}
 	openrouter := got.Providers["openrouter"]
 	if openrouter.Model != "repo-model" || openrouter.APIKeyEnv != "USER_KEY" ||
-		openrouter.BaseURL != "https://repo.example" {
+		openrouter.Reasoning != "high" || openrouter.BaseURL != "https://repo.example" {
 		t.Fatalf("unexpected merged provider: %#v", openrouter)
+	}
+	if got.AutoOpen == nil || *got.AutoOpen {
+		t.Fatalf("auto_open was not overridden: %#v", got.AutoOpen)
 	}
 }
 
@@ -81,6 +88,15 @@ func TestFingerprintStableAndChanges(t *testing.T) {
 	changedHash, _ := Fingerprint(second)
 	if changedHash == firstHash {
 		t.Fatal("provider change did not change fingerprint")
+	}
+	second = first
+	second.Providers = cloneProviders(first.Providers)
+	value := second.Providers["a"]
+	value.Reasoning = "high"
+	second.Providers["a"] = value
+	reasoningHash, _ := Fingerprint(second)
+	if reasoningHash == firstHash {
+		t.Fatal("reasoning change did not change fingerprint")
 	}
 }
 

@@ -21,14 +21,16 @@ func (Adapter) Name() string {
 	return "mock"
 }
 
-func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, error) {
+func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, string, []string, error) {
 	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "deterministic")
-	return &Provider{Getenv: opts.Getenv}, model, nil
+	reasoning := provider.ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "")
+	return &Provider{Getenv: opts.Getenv, Reasoning: reasoning}, model, reasoning, nil, nil
 }
 
 type Provider struct {
-	Getenv func(string) string
-	mu     sync.Mutex
+	Getenv    func(string) string
+	Reasoning string
+	mu        sync.Mutex
 }
 
 func (p *Provider) Name() string { return "mock" }
@@ -38,6 +40,9 @@ func (p *Provider) Detect() (bool, string) {
 }
 
 func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
+	if err := p.recordReasoning(); err != nil {
+		return "", err
+	}
 	if err := p.recordPrompt(prompt); err != nil {
 		return "", err
 	}
@@ -114,6 +119,16 @@ func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
 	}
 	encoded, err := json.Marshal(analysis)
 	return string(encoded), err
+}
+
+func (p *Provider) recordReasoning() error {
+	path := p.getenv("BGR_MOCK_REASONING_LOG")
+	if path == "" {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return os.WriteFile(path, []byte(p.Reasoning+"\n"), 0o600)
 }
 
 type cohort struct {

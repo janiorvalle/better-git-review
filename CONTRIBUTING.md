@@ -17,7 +17,8 @@ make verify
 
 `make verify` is the same local gate CI runs: build, vet, tests, GoReleaser
 configuration validation, snapshot archives, and an installed-artifact smoke
-test.
+test. CI also runs `shellcheck` and exercises `install.sh` against a local
+GoReleaser snapshot, never a real release.
 
 Tests must not depend on an LLM, network access, a user configuration file, or
 a populated cache. The mock provider is the default tool for end-to-end tests.
@@ -96,6 +97,11 @@ type StructuredProvider interface {
 Structured providers still receive semantic validation and deterministic
 seatbelts from the core. They skip only free-form extraction and repair.
 
+Providers may implement `Cataloger` to supply model choices and supported
+reasoning levels to `bgr configure`. Catalog failures must have a deterministic
+offline fallback; normal tests never call a live catalog. Unknown model IDs
+remain valid because provider catalogs go stale.
+
 ### Detection Etiquette
 
 - Detection must be fast and side-effect free.
@@ -121,6 +127,25 @@ seatbelts from the core. They skip only free-form extraction and repair.
 A typical CLI adapter should remain around 50 lines because the core guarantees
 the same validation, retry, staging, security, and output behavior for every
 provider.
+
+## Writing A Source Adapter
+
+The core does not depend on GitHub. Source adapters resolve a user selection
+into a unified diff plus source metadata; parsing, analysis, caching, and
+rendering stay shared. Implement `source.Source`, keep `Detect` fast and
+side-effect free, and register the adapter in `internal/app/registries.go`.
+
+Adapters should return actionable detection errors, use `internal/gitexec` for
+local git operations, avoid changing the working tree, and add unit plus
+subprocess e2e coverage. GitLab and other forges are intentionally community
+contribution territory.
+
+## Agent Integrations
+
+The schema-versioned `bgr --format json` output is the machine contract. The
+binary embeds a matching agent skill that users may install explicitly through
+`bgr configure`. An MCP wrapper is deferred until a shell-less host needs one;
+a thin community adapter over the JSON contract is welcome.
 
 ## Licensing
 

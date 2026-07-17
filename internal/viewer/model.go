@@ -11,6 +11,7 @@ import (
 
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/media"
 )
 
 type Page struct {
@@ -71,9 +72,23 @@ type FileView struct {
 	NextFile     int
 	UnifiedRows  []UnifiedRow
 	SplitRows    []SplitRow
+	BinaryLabel  string
+	ImagePreview bool
+	OldImage     *ImageAssetView
+	NewImage     *ImageAssetView
+}
+
+type ImageAssetView struct {
+	DataURI    template.URL
+	SizeLabel  string
+	Dimensions string
 }
 
 func buildPage(doc document.Document) (Page, error) {
+	return buildPageWithPreviews(doc, nil)
+}
+
+func buildPageWithPreviews(doc document.Document, previews map[int]media.Preview) (Page, error) {
 	encoded, err := json.Marshal(doc)
 	if err != nil {
 		return Page{}, err
@@ -106,20 +121,29 @@ func buildPage(doc document.Document) (Page, error) {
 		unified, split := BuildRows(file, index)
 		page.Additions += file.Additions
 		page.Deletions += file.Deletions
+		preview := previews[index]
+		binaryLabel := preview.Label
+		if binaryLabel == "" && file.Binary {
+			binaryLabel = "Binary file"
+		}
 		page.Files[index] = FileView{
-			Index:       index,
-			Path:        file.Path,
-			Status:      file.Status,
-			Lang:        langChip(file.Path, file.Binary),
-			Additions:   file.Additions,
-			Deletions:   file.Deletions,
-			Binary:      file.Binary,
-			Stubbed:     stubbedFiles[index],
-			Collapsed:   file.Additions+file.Deletions > 400,
-			PrevFile:    -1,
-			NextFile:    -1,
-			UnifiedRows: unified,
-			SplitRows:   split,
+			Index:        index,
+			Path:         file.Path,
+			Status:       file.Status,
+			Lang:         langChip(file.Path, file.Binary),
+			Additions:    file.Additions,
+			Deletions:    file.Deletions,
+			Binary:       file.Binary,
+			Stubbed:      stubbedFiles[index],
+			Collapsed:    file.Additions+file.Deletions > 400,
+			PrevFile:     -1,
+			NextFile:     -1,
+			UnifiedRows:  unified,
+			SplitRows:    split,
+			BinaryLabel:  binaryLabel,
+			ImagePreview: preview.Old != nil || preview.New != nil,
+			OldImage:     imageAssetView(preview.Old),
+			NewImage:     imageAssetView(preview.New),
 		}
 	}
 	page.Steps = append(page.Steps, StepView{
@@ -171,6 +195,15 @@ func buildPage(doc document.Document) (Page, error) {
 	}
 	page.Diagram = BuildDiagram(page.Steps)
 	return page, nil
+}
+
+func imageAssetView(asset *media.Asset) *ImageAssetView {
+	if asset == nil || !strings.HasPrefix(asset.DataURI, "data:image/") {
+		return nil
+	}
+	return &ImageAssetView{
+		DataURI: template.URL(asset.DataURI), SizeLabel: asset.SizeLabel, Dimensions: asset.Dimensions,
+	}
 }
 
 func docID(doc document.Document) string {

@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/janiorvalle/better-git-review/internal/config"
 	"github.com/janiorvalle/better-git-review/internal/document"
 	"github.com/janiorvalle/better-git-review/internal/source"
 )
@@ -37,6 +41,14 @@ func TestParseArgsRejectsConflictingSources(t *testing.T) {
 		{"123", "--dirty"},
 		{"--diff", "change.patch", "--dirty"},
 		{"--base", "main", "--dirty"},
+		{"--head", "topic", "--dirty"},
+		{"--commit", "abc", "--base", "main"},
+		{"--commit", "abc", "123"},
+		{"-i", "--diff", "change.patch"},
+		{"-i", "--base", "main"},
+		{"-i", "--head", "topic"},
+		{"-i", "--commit", "abc"},
+		{"-i", "--dirty"},
 	}
 	for _, args := range tests {
 		if _, err := parseArgs(args, Environment{
@@ -45,6 +57,18 @@ func TestParseArgsRejectsConflictingSources(t *testing.T) {
 		}); err == nil {
 			t.Fatalf("expected conflicting args to fail: %#v", args)
 		}
+	}
+}
+
+func TestParseArgsInteractiveQueryBeforeOtherFlags(t *testing.T) {
+	opts, err := parseArgs([]string{"-i", "auth", "--provider", "mock"}, Environment{
+		Stderr: &bytes.Buffer{}, Getwd: func() (string, error) { return t.TempDir(), nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Interactive || opts.PickerQuery != "auth" || opts.Provider != "mock" {
+		t.Fatalf("opts = %#v", opts)
 	}
 }
 
@@ -87,6 +111,130 @@ func TestParseArgsAcceptsViewerFlags(t *testing.T) {
 	}
 	if opts.Format != "json" || !opts.Open {
 		t.Fatalf("unexpected viewer options: %#v", opts)
+	}
+}
+
+func TestShouldOpenDecisionMatrix(t *testing.T) {
+	falseValue := false
+	tests := []struct {
+		name string
+		opts options
+		cfg  config.Config
+		tty  bool
+		want bool
+	}{
+		{name: "tty html defaults open", opts: options{Format: "html"}, tty: true, want: true},
+		{name: "non tty stays closed", opts: options{Format: "html"}, tty: false},
+		{name: "explicit force", opts: options{Format: "html", Open: true}, tty: false, want: true},
+		{name: "no open wins", opts: options{Format: "html", NoOpen: true}, tty: true},
+		{name: "json never opens", opts: options{Format: "json", Open: true}, tty: true},
+		{name: "config disables", opts: options{Format: "html"}, cfg: config.Config{AutoOpen: &falseValue}, tty: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := shouldOpen(test.opts, test.cfg, test.tty); got != test.want {
+				t.Fatalf("shouldOpen = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestFirstRunOnboardingWritesConfig(t *testing.T) {
+	configHome := useTestConfigHome(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	stdinTTY := true
+	stderrTTY := false
+	input := strings.NewReader("2\n\n\n\n\nn\n")
+	if err := Run(context.Background(), nil, Environment{
+		Stdin: input, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
+		Getwd:    func() (string, error) { return t.TempDir(), nil },
+		StdinTTY: &stdinTTY, StderrTTY: &stderrTTY,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(configHome, "better-git-review", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, expected := range []string{`provider = "codex-cli"`, `model = "gpt-5.6-luna"`, `reasoning = "low"`} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("config missing %q:\n%s", expected, text)
+		}
+	}
+}
+
+func TestEmptyGitDiffEntersPickerWhenInputIsTTY(t *testing.T) {
+	repo := t.TempDir()
+	runAppGit(t, repo, "init", "-b", "main")
+	runAppGit(t, repo, "config", "user.email", "app@example.com")
+	runAppGit(t, repo, "config", "user.name", "App Test")
+	if err := os.WriteFile(filepath.Join(repo, "file.txt"), []byte("one\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runAppGit(t, repo, "add", "file.txt")
+	runAppGit(t, repo, "commit", "-m", "first")
+	if err := os.WriteFile(filepath.Join(repo, "file.txt"), []byte("two\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runAppGit(t, repo, "add", "file.txt")
+	runAppGit(t, repo, "commit", "-m", "second")
+
+	configHome := useTestConfigHome(t)
+	useTestStateHome(t)
+	if err := config.WriteUser(filepath.Join(configHome, "better-git-review", "config.toml"), config.Config{
+		Provider: "mock", Providers: map[string]config.ProviderConfig{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "picked.html")
+	stdinTTY := true
+	stderrTTY := false
+	var stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--out", output}, Environment{
+		Stdin: strings.NewReader("1\n"), Stdout: &bytes.Buffer{}, Stderr: &stderr,
+		Getwd: func() (string, error) { return repo, nil }, StdinTTY: &stdinTTY, StderrTTY: &stderrTTY,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "Review what?") || !strings.Contains(stderr.String(), "running: bgr --commit") {
+		t.Fatalf("picker transcript missing:\n%s", stderr.String())
+	}
+}
+
+func useTestConfigHome(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", dir)
+	} else {
+		t.Setenv("XDG_CONFIG_HOME", dir)
+	}
+	return dir
+}
+
+func useTestStateHome(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", dir)
+	} else {
+		t.Setenv("XDG_STATE_HOME", dir)
+	}
+}
+
+func runAppGit(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = repo
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
 	}
 }
 

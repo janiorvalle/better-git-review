@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
 	"os"
 
 	"github.com/janiorvalle/better-git-review/internal/app"
+	"github.com/janiorvalle/better-git-review/internal/terminal"
 )
 
 func main() {
@@ -15,7 +15,9 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "bgr: %v\n", err)
+		info, _ := os.Stderr.Stat()
+		styled := info != nil && info.Mode()&os.ModeCharDevice != 0 && os.Getenv("NO_COLOR") == ""
+		terminal.Error(os.Stderr, err.Error(), styled)
 		os.Exit(1)
 	}
 }

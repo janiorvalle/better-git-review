@@ -19,18 +19,21 @@ import (
 
 type Config struct {
 	Provider  string                    `toml:"provider"`
+	AutoOpen  *bool                     `toml:"auto_open"`
 	Providers map[string]ProviderConfig `toml:"providers"`
 }
 
 type ProviderConfig struct {
 	Model     string `toml:"model" json:"model,omitempty"`
+	Reasoning string `toml:"reasoning" json:"reasoning,omitempty"`
 	APIKeyEnv string `toml:"api_key_env" json:"api_key_env,omitempty"`
 	BaseURL   string `toml:"base_url" json:"base_url,omitempty"`
 }
 
 type Flags struct {
-	Provider string
-	Model    string
+	Provider  string
+	Model     string
+	Reasoning string
 }
 
 type LoadOptions struct {
@@ -48,6 +51,8 @@ type LoadOptions struct {
 
 type Loaded struct {
 	Config          Config
+	UserConfigFound bool
+	UserConfigPath  string
 	RepoConfig      Config
 	RepoConfigFound bool
 }
@@ -79,7 +84,7 @@ func Load(opts LoadOptions) (Loaded, error) {
 		opts.RepoConfigPath = filepath.Join(opts.RepoDir, ".better-git-review.toml")
 	}
 
-	userCfg, _, err := readConfig(opts.UserConfigPath)
+	userCfg, userFound, err := readConfig(opts.UserConfigPath)
 	if err != nil {
 		return Loaded{}, fmt.Errorf("read user config: %w", err)
 	}
@@ -108,16 +113,34 @@ func Load(opts LoadOptions) (Loaded, error) {
 			merged.Providers[providerName] = providerCfg
 		}
 	}
-	return Loaded{Config: merged, RepoConfig: repoCfg, RepoConfigFound: repoFound}, nil
+	if opts.Flags.Reasoning != "" {
+		if merged.Providers == nil {
+			merged.Providers = map[string]ProviderConfig{}
+		}
+		providerName := merged.Provider
+		if providerName != "" {
+			providerCfg := merged.Providers[providerName]
+			providerCfg.Reasoning = opts.Flags.Reasoning
+			merged.Providers[providerName] = providerCfg
+		}
+	}
+	return Loaded{
+		Config: merged, UserConfigFound: userFound, UserConfigPath: opts.UserConfigPath,
+		RepoConfig: repoCfg, RepoConfigFound: repoFound,
+	}, nil
 }
 
 func Merge(base, override Config) Config {
 	result := Config{
 		Provider:  base.Provider,
+		AutoOpen:  cloneBool(base.AutoOpen),
 		Providers: cloneProviders(base.Providers),
 	}
 	if override.Provider != "" {
 		result.Provider = override.Provider
+	}
+	if override.AutoOpen != nil {
+		result.AutoOpen = cloneBool(override.AutoOpen)
 	}
 	if result.Providers == nil {
 		result.Providers = map[string]ProviderConfig{}
@@ -126,6 +149,9 @@ func Merge(base, override Config) Config {
 		current := result.Providers[name]
 		if providerOverride.Model != "" {
 			current.Model = providerOverride.Model
+		}
+		if providerOverride.Reasoning != "" {
+			current.Reasoning = providerOverride.Reasoning
 		}
 		if providerOverride.APIKeyEnv != "" {
 			current.APIKeyEnv = providerOverride.APIKeyEnv
@@ -183,6 +209,9 @@ func DescribeProviderSettings(cfg Config) string {
 		if value.Model != "" {
 			lines = append(lines, fmt.Sprintf("model = %q", value.Model))
 		}
+		if value.Reasoning != "" {
+			lines = append(lines, fmt.Sprintf("reasoning = %q", value.Reasoning))
+		}
 		if value.APIKeyEnv != "" {
 			lines = append(lines, fmt.Sprintf("api_key_env = %q", value.APIKeyEnv))
 		}
@@ -216,7 +245,11 @@ func ensureRepoTrust(opts LoadOptions, repoCfg Config) error {
 			return fmt.Errorf("repo config is not trusted; rerun with --trust-repo-config or --yes to accept it")
 		}
 		fmt.Fprint(opts.Output, "Trust these settings for this repository? [y/N] ")
-		answer, readErr := bufio.NewReader(opts.Input).ReadString('\n')
+		reader, ok := opts.Input.(*bufio.Reader)
+		if !ok {
+			reader = bufio.NewReader(opts.Input)
+		}
+		answer, readErr := reader.ReadString('\n')
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
 			return fmt.Errorf("read trust confirmation: %w", readErr)
 		}
@@ -311,6 +344,57 @@ func cloneProviders(input map[string]ProviderConfig) map[string]ProviderConfig {
 		result[key] = value
 	}
 	return result
+}
+
+func cloneBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func UserConfigPath() (string, error) {
+	dir, err := userConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "better-git-review", "config.toml"), nil
+}
+
+func WriteUser(path string, cfg Config) error {
+	if path == "" {
+		var err error
+		path, err = UserConfigPath()
+		if err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	var buffer strings.Builder
+	if err := toml.NewEncoder(&buffer).Encode(cfg); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
+	if err != nil {
+		return err
+	}
+	tempName := temp.Name()
+	defer os.Remove(tempName)
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.WriteString(buffer.String()); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempName, path)
 }
 
 func userConfigDir() (string, error) {

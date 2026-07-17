@@ -3,7 +3,20 @@ package claude
 import (
 	"strings"
 	"testing"
+
+	"github.com/janiorvalle/better-git-review/internal/provider"
 )
+
+func TestUnsupportedEffortReturnsEffectiveDefault(t *testing.T) {
+	selected, _, reasoning, warnings, err := newWithEffortSupport(provider.AdapterOptions{ReasoningOverride: "high"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := selected.(*CLI)
+	if reasoning != "" || client.Reasoning != "" || len(warnings) != 1 {
+		t.Fatalf("reasoning = %q, client = %q, warnings = %#v", reasoning, client.Reasoning, warnings)
+	}
+}
 
 func TestParseOutputShapes(t *testing.T) {
 	tests := map[string]struct {

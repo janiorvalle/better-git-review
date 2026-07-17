@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,7 +290,7 @@ func TestCacheSchemaBumpDoesNotReuseV2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v2Key := cache.Key(diffBytes, "mock", "deterministic", 2)
+	v2Key := cache.Key(diffBytes, "mock", "deterministic", "", 2)
 	cacheDir := filepath.Join(stateHome, "better-git-review", "cache")
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -307,7 +310,7 @@ func TestCacheSchemaBumpDoesNotReuseV2(t *testing.T) {
 	if doc.Meta.Cached || strings.Contains(result.stderr, "cache hit") {
 		t.Fatal("v2 cache entry was reused")
 	}
-	if cache.Key(diffBytes, "mock", "deterministic", 3) == v2Key {
+	if cache.Key(diffBytes, "mock", "deterministic", "", 3) == v2Key {
 		t.Fatal("schema bump did not change cache key")
 	}
 }
@@ -411,6 +414,9 @@ func TestCacheReusesIdenticalDiffWithCurrentSourceMetadata(t *testing.T) {
 	if doc.Source.Title != "second.patch" {
 		t.Fatalf("source title = %q", doc.Source.Title)
 	}
+	if doc.Source.Range != "second.patch" {
+		t.Fatalf("source range = %q", doc.Source.Range)
+	}
 }
 
 func TestStdin(t *testing.T) {
@@ -482,6 +488,252 @@ func TestGitSources(t *testing.T) {
 			t.Fatalf("fallback was not logged: %s", result.stderr)
 		}
 	})
+
+	t.Run("arbitrary head and single commit", func(t *testing.T) {
+		repo := initializeRepo(t)
+		runGit(t, repo, "switch", "-c", "one")
+		if err := os.WriteFile(filepath.Join(repo, "one.go"), []byte("package one\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repo, "add", "one.go")
+		runGit(t, repo, "commit", "-m", "one commit")
+		oneSHA := gitOutput(t, repo, "rev-parse", "HEAD")
+		runGit(t, repo, "switch", "main")
+		runGit(t, repo, "switch", "-c", "two")
+		if err := os.WriteFile(filepath.Join(repo, "two.go"), []byte("package two\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repo, "add", "two.go")
+		runGit(t, repo, "commit", "-m", "two commit")
+
+		headOutput := filepath.Join(t.TempDir(), "head.json")
+		headRun := runCLI(t, isolatedEnvironment(t), nil,
+			"-C", repo, "--base", "main", "--head", "one", "--provider", "mock", "--format", "json", "--out", headOutput)
+		if headRun.err != nil {
+			t.Fatalf("head command failed: %v\n%s", headRun.err, headRun.stderr)
+		}
+		headDoc := readAndValidate(t, headOutput)
+		if len(headDoc.Files) != 1 || headDoc.Files[0].Path != "one.go" || headDoc.Source.Range != "main...one" {
+			t.Fatalf("unexpected head document: %#v", headDoc)
+		}
+
+		commitOutput := filepath.Join(t.TempDir(), "commit.json")
+		commitRun := runCLI(t, isolatedEnvironment(t), nil,
+			"-C", repo, "--commit", oneSHA, "--provider", "mock", "--format", "json", "--out", commitOutput)
+		if commitRun.err != nil {
+			t.Fatalf("commit command failed: %v\n%s", commitRun.err, commitRun.stderr)
+		}
+		commitDoc := readAndValidate(t, commitOutput)
+		if len(commitDoc.Files) != 1 || commitDoc.Files[0].Path != "one.go" {
+			t.Fatalf("unexpected commit document: %#v", commitDoc)
+		}
+		if commitDoc.Files[0].Hunks[0].Blame == nil || commitDoc.Files[0].Hunks[0].Blame.Author != "E2E" {
+			t.Fatalf("commit blame did not use the reviewed commit: %#v", commitDoc.Files[0].Hunks[0].Blame)
+		}
+	})
+}
+
+func TestInteractivePickerSelectsCommit(t *testing.T) {
+	repo := initializeRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "picked.go"), []byte("package picked\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "picked.go")
+	runGit(t, repo, "commit", "-m", "picker target")
+	sha := gitOutput(t, repo, "rev-parse", "HEAD")
+	output := filepath.Join(t.TempDir(), "picker.json")
+	result := runCLI(t, isolatedEnvironment(t), []byte("1\n"),
+		"-C", repo, "-i", sha, "--provider", "mock", "--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("picker failed: %v\n%s", result.err, result.stderr)
+	}
+	doc := readAndValidate(t, output)
+	if len(doc.Files) != 1 || doc.Files[0].Path != "picked.go" || !strings.Contains(result.stderr, "running: bgr --commit") {
+		t.Fatalf("unexpected picker result: %#v\n%s", doc.Files, result.stderr)
+	}
+}
+
+func TestGitHub503FallsBackToLocalRefs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake gh shell shim is covered by Windows unit tests")
+	}
+	repo := initializeRepo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, t.TempDir(), "init", "--bare", remote)
+	runGit(t, repo, "remote", "add", "origin", remote)
+	runGit(t, repo, "push", "origin", "main")
+	baseOID := gitOutput(t, repo, "rev-parse", "main")
+	runGit(t, repo, "switch", "-c", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "fallback.go"), []byte("package fallback\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "fallback.go")
+	runGit(t, repo, "commit", "-m", "fallback")
+	headOID := gitOutput(t, repo, "rev-parse", "HEAD")
+	runGit(t, repo, "push", "origin", "feature")
+
+	shimDir := t.TempDir()
+	shim := filepath.Join(shimDir, "gh")
+	metadata := fmt.Sprintf(`{"number":5,"title":"Fallback","body":"","baseRefName":"main","headRefName":"feature","baseRefOid":"%s","headRefOid":"%s","changedFiles":1,"url":"https://example.invalid/5"}`, baseOID, headOID)
+	script := "#!/bin/sh\nif [ \"$1 $2\" = \"auth status\" ]; then exit 0; fi\nif [ \"$1 $2\" = \"pr view\" ]; then printf '%s\\n' '" + metadata + "'; exit 0; fi\necho 'HTTP 503 Service Unavailable' >&2\nexit 1\n"
+	if err := os.WriteFile(shim, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env := setEnv(isolatedEnvironment(t), "PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output := filepath.Join(t.TempDir(), "github.json")
+	result := runCLI(t, env, nil, "5", "-C", repo, "--provider", "mock", "--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("fallback failed: %v\n%s", result.err, result.stderr)
+	}
+	doc := readAndValidate(t, output)
+	if len(doc.Files) != 1 || doc.Files[0].Path != "fallback.go" || !strings.Contains(result.stderr, "falling back to local git objects") {
+		t.Fatalf("unexpected fallback: %#v\n%s", doc.Files, result.stderr)
+	}
+}
+
+func TestPRModeMissingGHIsActionable(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "PATH", t.TempDir())
+	result := runCLI(t, env, nil, "5", "-C", t.TempDir(), "--provider", "mock")
+	assertFailureContains(t, result, "cli.github.com")
+	assertFailureContains(t, result, "--base/--head")
+	assertFailureContains(t, result, "--commit")
+}
+
+func TestConfigureRoundTripAndSkillInstall(t *testing.T) {
+	env := isolatedEnvironment(t)
+	home := envValue(env, "HOME")
+	first := runCLI(t, env, []byte("2\n\n\n\n3\n"), "configure")
+	if first.err != nil {
+		t.Fatalf("configure failed: %v\n%s", first.err, first.stderr)
+	}
+	configPath := filepath.Join(envConfigHome(env), "better-git-review", "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`provider = "codex-cli"`, `model = "gpt-5.6-luna"`, `reasoning = "low"`} {
+		if !strings.Contains(string(data), expected) {
+			t.Fatalf("config missing %q:\n%s", expected, data)
+		}
+	}
+	skillPath := filepath.Join(home, ".codex", "skills", "bgr", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("Codex skill was not installed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "bgr", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("Claude skill should not be installed: %v", err)
+	}
+
+	second := runCLI(t, env, []byte("\n\n\n\n\n"), "configure")
+	if second.err != nil {
+		t.Fatalf("configure round trip failed: %v\n%s", second.err, second.stderr)
+	}
+	updated, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, updated) {
+		t.Fatalf("round trip changed config:\nBEFORE\n%s\nAFTER\n%s", data, updated)
+	}
+}
+
+func TestConfigureDefaultSkipsSkillInstall(t *testing.T) {
+	env := isolatedEnvironment(t)
+	result := runCLI(t, env, []byte("2\n\n\n\n\n"), "configure")
+	if result.err != nil {
+		t.Fatalf("configure failed: %v\n%s", result.err, result.stderr)
+	}
+	home := envValue(env, "HOME")
+	for _, path := range []string{
+		filepath.Join(home, ".claude", "skills", "bgr", "SKILL.md"),
+		filepath.Join(home, ".codex", "skills", "bgr", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("default configure installed %s: %v", path, err)
+		}
+	}
+}
+
+func TestFreshNonTTYRunDoesNotOnboard(t *testing.T) {
+	env := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "plain.json")
+	result := runCLI(t, env, nil, "--diff", fixturePath(t), "--provider", "mock", "--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("non-TTY run failed: %v\n%s", result.err, result.stderr)
+	}
+	if strings.Contains(result.stderr, "Welcome to bgr") || strings.Contains(result.stderr, "bgr configure") {
+		t.Fatalf("non-TTY run onboarded:\n%s", result.stderr)
+	}
+	if strings.Contains(result.stderr, "\x1b") {
+		t.Fatalf("non-TTY output contains ANSI bytes: %q", result.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(envConfigHome(env), "better-git-review", "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("non-TTY run wrote config: %v", err)
+	}
+}
+
+func TestReasoningFlagReachesProviderAndAnnouncement(t *testing.T) {
+	env := isolatedEnvironment(t)
+	reasoningLog := filepath.Join(t.TempDir(), "reasoning.txt")
+	env = setEnv(env, "BGR_MOCK_REASONING_LOG", reasoningLog)
+	output := filepath.Join(t.TempDir(), "reasoning.json")
+	result := runCLI(t, env, nil,
+		"--diff", fixturePath(t), "--provider", "mock", "--reasoning", "high", "--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("reasoning run failed: %v\n%s", result.err, result.stderr)
+	}
+	readAndValidate(t, output)
+	if !strings.Contains(result.stderr, `reasoning: "high"`) {
+		t.Fatalf("reasoning announcement missing:\n%s", result.stderr)
+	}
+	data, err := os.ReadFile(reasoningLog)
+	if err != nil || strings.TrimSpace(string(data)) != "high" {
+		t.Fatalf("provider reasoning log = %q, %v", data, err)
+	}
+}
+
+func TestChangedImageEmbedsBeforeAndAfterPreviews(t *testing.T) {
+	repo := initializeRepo(t)
+	imagePath := filepath.Join(repo, "preview.png")
+	writePNG(t, imagePath, 2, 2, color.RGBA{R: 255, A: 255})
+	runGit(t, repo, "add", "preview.png")
+	runGit(t, repo, "commit", "-m", "add image")
+	runGit(t, repo, "branch", "image-base")
+	writePNG(t, imagePath, 3, 1, color.RGBA{G: 255, A: 255})
+	runGit(t, repo, "add", "preview.png")
+	runGit(t, repo, "commit", "-m", "change image")
+
+	output := filepath.Join(t.TempDir(), "image.html")
+	result := runCLI(t, isolatedEnvironment(t), nil,
+		"-C", repo, "--base", "image-base", "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("image review failed: %v\n%s", result.err, result.stderr)
+	}
+	html, _ := readHTMLDocument(t, output)
+	if strings.Count(html, `src="data:image/png;base64,`) != 2 {
+		t.Fatalf("expected two embedded PNG previews, got %d", strings.Count(html, `src="data:image/png;base64,`))
+	}
+	if !strings.Contains(html, "2 x 2 px") || !strings.Contains(html, "3 x 1 px") {
+		t.Fatalf("image dimensions missing from preview")
+	}
+	assertSelfContained(t, html)
+}
+
+func TestPatchBinaryImageUsesHonestLabel(t *testing.T) {
+	patch := filepath.Join(t.TempDir(), "image.patch")
+	data := "diff --git a/image.png b/image.png\nindex 1111111..2222222 100644\nBinary files a/image.png and b/image.png differ\n"
+	if err := os.WriteFile(patch, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "patch-image.html")
+	result := runCLI(t, isolatedEnvironment(t), nil, "--diff", patch, "--provider", "mock", "--out", output)
+	if result.err != nil {
+		t.Fatalf("patch image review failed: %v\n%s", result.err, result.stderr)
+	}
+	html, _ := readHTMLDocument(t, output)
+	if !strings.Contains(html, "Binary image \u00b7 content not available from patch input.") || strings.Contains(html, "data:image") {
+		t.Fatalf("patch image label is misleading")
+	}
 }
 
 func TestDirtyReviewsOnlyUncommittedChanges(t *testing.T) {
@@ -519,6 +771,16 @@ func TestFailureModes(t *testing.T) {
 		}
 		result := runCLI(t, isolatedEnvironment(t), nil, "--diff", empty, "--provider", "mock")
 		assertFailureContains(t, result, "diff is empty")
+	})
+
+	t.Run("empty git diff non tty", func(t *testing.T) {
+		repo := initializeRepo(t)
+		result := runCLI(t, isolatedEnvironment(t), nil,
+			"-C", repo, "--provider", "mock", "--out", filepath.Join(t.TempDir(), "empty.html"))
+		assertFailureContains(t, result, "diff is empty")
+		if strings.Contains(result.stderr, "Review what?") {
+			t.Fatalf("non-TTY empty diff opened picker: %s", result.stderr)
+		}
 	})
 
 	t.Run("no provider", func(t *testing.T) {
@@ -701,8 +963,10 @@ func assertSelfContained(t *testing.T, html string) {
 	t.Helper()
 	// ZERO external references: the walkthrough is a complete offline
 	// artifact (mermaid and its CDN were removed in schema v4).
+	allowedImageData := regexp.MustCompile(`(?i)<img\b[^>]*\bsrc\s*=\s*["']data:image/(?:png|jpeg|gif|webp|svg(?:\+|&#43;)xml);base64,[a-z0-9+/=&#;]+["'][^>]*>`)
+	withoutEmbeddedImages := allowedImageData.ReplaceAllString(html, "")
 	attributePattern := regexp.MustCompile(`(?i)(?:src|href)\s*=\s*["']([^"']+)["']`)
-	for _, match := range attributePattern.FindAllStringSubmatch(html, -1) {
+	for _, match := range attributePattern.FindAllStringSubmatch(withoutEmbeddedImages, -1) {
 		t.Fatalf("unexpected external reference: %s", match[1])
 	}
 	urlPattern := regexp.MustCompile(`(?i)url\(([^)]+)\)`)
@@ -712,6 +976,27 @@ func assertSelfContained(t *testing.T, html string) {
 		if !strings.HasPrefix(reference, "#") {
 			t.Fatalf("unexpected CSS url reference: %s", match[1])
 		}
+	}
+}
+
+func writePNG(t *testing.T, path string, width, height int, fill color.RGBA) {
+	t.Helper()
+	value := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			value.Set(x, y, fill)
+		}
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(file, value); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -764,11 +1049,13 @@ func isolatedEnvironment(t *testing.T) []string {
 	t.Helper()
 	root := t.TempDir()
 	env := removeEnv(os.Environ(),
-		"HOME", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+		"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
 		"BGR_STAGE_BUDGET", "BGR_MOCK_FAIL_SUMMARY", "BGR_MOCK_PROMPT_LOG",
+		"BGR_MOCK_REASONING_LOG",
 	)
 	env = append(env,
 		"HOME="+root,
+		"USERPROFILE="+root,
 		"APPDATA="+filepath.Join(root, "appdata"),
 		"LOCALAPPDATA="+filepath.Join(root, "localappdata"),
 		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),
@@ -804,6 +1091,13 @@ func envValue(env []string, key string) string {
 	return ""
 }
 
+func envConfigHome(env []string) string {
+	if runtime.GOOS == "windows" {
+		return envValue(env, "APPDATA")
+	}
+	return envValue(env, "XDG_CONFIG_HOME")
+}
+
 func initializeRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -827,6 +1121,17 @@ func runGit(t *testing.T, repo string, args ...string) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
 	}
+}
+
+func gitOutput(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = repo
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func assertFailureContains(t *testing.T, result commandResult, text string) {

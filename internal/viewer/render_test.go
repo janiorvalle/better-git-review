@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
+	"github.com/janiorvalle/better-git-review/internal/media"
 )
 
 func TestRenderEscapesHostileData(t *testing.T) {
@@ -66,6 +67,33 @@ func TestRenderEscapesHostileData(t *testing.T) {
 	}
 	if decoded.Files[0].Path != hostile {
 		t.Fatalf("JSON island did not preserve hostile text: %q", decoded.Files[0].Path)
+	}
+}
+
+func TestRenderUsesImgForSVGPreviewOutsideJSONIsland(t *testing.T) {
+	doc := document.Document{
+		SchemaVersion: document.SchemaVersion,
+		Source:        document.Source{Title: "Image", Range: "main...head"},
+		Files:         []document.File{{Path: "image.svg", Status: "modified", Binary: true}},
+		Analysis: document.Analysis{Title: "Image", Overview: "Image change", Cohorts: []document.Cohort{{
+			Title: "Image", Layer: "ui", Intent: "Image", Narrative: "Image",
+			Files: []int{0}, FileSummaries: []string{"Image"}, ReviewNotes: []string{}, DependsOn: []int{},
+		}}},
+	}
+	dataURI := "data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+PC9zdmc+"
+	output, err := RenderWithPreviews(doc, map[int]media.Preview{0: {
+		Image: true, Old: &media.Asset{DataURI: dataURI, SizeLabel: "1 B"},
+		New: &media.Asset{DataURI: dataURI, SizeLabel: "1 B"}, Label: "Binary image",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(output)
+	if strings.Count(html, `<img src="data:image/svg&#43;xml;base64,`) != 2 || strings.Contains(html, "<svg onload") {
+		t.Fatalf("SVG preview was not isolated in img tags:\n%s", html)
+	}
+	if strings.Contains(extractIsland(t, html), "data:image") {
+		t.Fatal("render-time preview leaked into the JSON island")
 	}
 }
 

@@ -45,7 +45,7 @@ func (Source) Collect(_ context.Context, opts source.Options) (source.Result, er
 		diffBytes, err = os.ReadFile(opts.DiffFile)
 		base := filepath.Base(opts.DiffFile)
 		name = strings.TrimSuffix(base, filepath.Ext(base))
-		title, rangeText = base, opts.DiffFile
+		title, rangeText = base, base
 	}
 	if err != nil {
 		return source.Result{}, fmt.Errorf("read diff %q: %w", opts.DiffFile, err)

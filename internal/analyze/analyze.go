@@ -28,6 +28,7 @@ type Options struct {
 	Staged   bool
 	Budget   int
 	Random   io.Reader
+	Progress func(completed, total int)
 }
 
 type FileSummary struct {
@@ -98,6 +99,8 @@ func runStaged(
 	summaryErrors := make([]error, len(opts.Files))
 	jobs := make(chan int)
 	var workers sync.WaitGroup
+	var progressMu sync.Mutex
+	var completed int
 	workerCount := min(StageConcurrency, len(opts.Files))
 	for range workerCount {
 		workers.Add(1)
@@ -117,9 +120,15 @@ func runStaged(
 				if err != nil {
 					summaryErrors[index] = err
 					summaries[index] = stubSummary(opts.Files[index])
-					continue
+				} else {
+					summaries[index] = summary
 				}
-				summaries[index] = summary
+				progressMu.Lock()
+				completed++
+				if opts.Progress != nil {
+					opts.Progress(completed, len(opts.Files))
+				}
+				progressMu.Unlock()
 			}
 		}()
 	}

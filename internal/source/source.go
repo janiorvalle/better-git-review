@@ -16,6 +16,8 @@ type Options struct {
 	PR       string
 	DiffFile string
 	Base     string
+	Head     string
+	Commit   string
 	Dirty    bool
 	RepoDir  string
 	Stdin    io.Reader
@@ -23,8 +25,11 @@ type Options struct {
 }
 
 type Result struct {
-	Source document.Source
-	Diff   []byte
+	Source  document.Source
+	Diff    []byte
+	BaseRef string
+	HeadRef string
+	Dirty   bool
 }
 
 type Source interface {

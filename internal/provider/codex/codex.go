@@ -15,16 +15,43 @@ func (Adapter) Name() string {
 	return "codex-cli"
 }
 
-func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, error) {
-	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "default")
-	return &CLI{Model: model}, model, nil
+func (Adapter) New(opts provider.AdapterOptions) (provider.Provider, string, string, []string, error) {
+	model := provider.ChooseModel(opts.ModelOverride, opts.ConfiguredModel, "gpt-5.6-luna")
+	reasoning := provider.ChooseReasoning(opts.ReasoningOverride, opts.ConfiguredReasoning, "low")
+	if err := provider.ValidateReasoning("codex-cli", reasoning, codexReasoningLevels(model)...); err != nil {
+		return nil, "", "", nil, err
+	}
+	return &CLI{Model: model, Reasoning: reasoning}, model, reasoning, nil, nil
 }
 
 type CLI struct {
-	Model string
+	Model     string
+	Reasoning string
 }
 
 func (p *CLI) Name() string { return "codex-cli" }
+
+func (p *CLI) Models(context.Context) ([]provider.ModelOption, error) {
+	return []provider.ModelOption{
+		{ID: "gpt-5.6-luna", Label: "Luna", Note: "recommended", Default: true},
+		{ID: "gpt-5.6-terra", Label: "Terra", Note: "balanced"},
+		{ID: "gpt-5.6-sol", Label: "Sol", Note: "frontier"},
+	}, nil
+}
+
+func (p *CLI) ReasoningLevels() []string {
+	return codexReasoningLevels(p.Model)
+}
+
+func (p *CLI) SetCatalogModel(model string) { p.Model = model }
+
+func codexReasoningLevels(model string) []string {
+	levels := []string{"low", "medium", "high", "xhigh", "max"}
+	if model == "gpt-5.6-terra" || model == "gpt-5.6-sol" {
+		levels = append(levels, "ultra")
+	}
+	return levels
+}
 
 func (p *CLI) Detect() (bool, string) {
 	path, err := exec.LookPath("codex")
@@ -50,6 +77,18 @@ func (p *CLI) Complete(ctx context.Context, prompt string) (string, error) {
 	}
 	defer os.Remove(outputPath)
 
+	args := p.args(isolatedDir, outputPath)
+	if _, err := provider.RunCommand(ctx, isolatedDir, []byte(prompt), "codex", args...); err != nil {
+		return "", err
+	}
+	output, err := os.ReadFile(outputPath)
+	if err != nil {
+		return "", fmt.Errorf("read codex last message: %w", err)
+	}
+	return string(output), nil
+}
+
+func (p *CLI) args(isolatedDir, outputPath string) []string {
 	args := []string{
 		"exec",
 		"--ephemeral",
@@ -70,15 +109,11 @@ func (p *CLI) Complete(ctx context.Context, prompt string) (string, error) {
 	if p.Model != "" && p.Model != "default" {
 		args = append(args, "--model", p.Model)
 	}
+	if p.Reasoning != "" {
+		args = append(args, "--config", fmt.Sprintf("model_reasoning_effort=%q", p.Reasoning))
+	}
 	args = append(args, "-")
-	if _, err := provider.RunCommand(ctx, isolatedDir, []byte(prompt), "codex", args...); err != nil {
-		return "", err
-	}
-	output, err := os.ReadFile(outputPath)
-	if err != nil {
-		return "", fmt.Errorf("read codex last message: %w", err)
-	}
-	return string(output), nil
+	return args
 }
 
 var disabledFeatures = []string{

@@ -21,22 +21,42 @@ type StructuredProvider interface {
 	CompleteStructured(ctx context.Context, prompt string, schema json.RawMessage) (json.RawMessage, error)
 }
 
+type ModelOption struct {
+	ID      string
+	Label   string
+	Note    string
+	Default bool
+}
+
+type Cataloger interface {
+	Models(context.Context) ([]ModelOption, error)
+	ReasoningLevels() []string
+}
+
+type CatalogModelSelector interface {
+	SetCatalogModel(string)
+}
+
 type Selection struct {
-	Provider Provider
-	Model    string
+	Provider  Provider
+	Model     string
+	Reasoning string
+	Warnings  []string
 }
 
 type Adapter interface {
 	Name() string
-	New(AdapterOptions) (Provider, string, error)
+	New(AdapterOptions) (Provider, string, string, []string, error)
 }
 
 type AdapterOptions struct {
-	ModelOverride   string
-	ConfiguredModel string
-	APIKeyEnv       string
-	BaseURL         string
-	Getenv          func(string) string
+	ModelOverride       string
+	ConfiguredModel     string
+	ReasoningOverride   string
+	ConfiguredReasoning string
+	APIKeyEnv           string
+	BaseURL             string
+	Getenv              func(string) string
 }
 
 type Registry struct {
@@ -48,9 +68,10 @@ func NewRegistry(adapters ...Adapter) Registry {
 }
 
 type SelectOptions struct {
-	Config        config.Config
-	ModelOverride string
-	Getenv        func(string) string
+	Config            config.Config
+	ModelOverride     string
+	ReasoningOverride string
+	Getenv            func(string) string
 }
 
 func (r Registry) Select(opts SelectOptions) (Selection, error) {
@@ -86,17 +107,19 @@ func (r Registry) selectNamed(name string, opts SelectOptions) (Selection, error
 		if adapter.Name() != name {
 			continue
 		}
-		selected, model, err := adapter.New(AdapterOptions{
-			ModelOverride:   opts.ModelOverride,
-			ConfiguredModel: providerConfig.Model,
-			APIKeyEnv:       providerConfig.APIKeyEnv,
-			BaseURL:         providerConfig.BaseURL,
-			Getenv:          opts.Getenv,
+		selected, model, reasoning, warnings, err := adapter.New(AdapterOptions{
+			ModelOverride:       opts.ModelOverride,
+			ConfiguredModel:     providerConfig.Model,
+			ReasoningOverride:   opts.ReasoningOverride,
+			ConfiguredReasoning: providerConfig.Reasoning,
+			APIKeyEnv:           providerConfig.APIKeyEnv,
+			BaseURL:             providerConfig.BaseURL,
+			Getenv:              opts.Getenv,
 		})
 		if err != nil {
 			return Selection{}, err
 		}
-		return Selection{Provider: selected, Model: model}, nil
+		return Selection{Provider: selected, Model: model, Reasoning: reasoning, Warnings: warnings}, nil
 	}
 	return Selection{}, fmt.Errorf("unknown provider %q (supported: %s)", name, strings.Join(r.Names(), ", "))
 }
@@ -106,6 +129,25 @@ func ChooseModel(override, configured, fallback string) string {
 		return override
 	}
 	return DefaultString(configured, fallback)
+}
+
+func ChooseReasoning(override, configured, fallback string) string {
+	if override != "" {
+		return override
+	}
+	return DefaultString(configured, fallback)
+}
+
+func ValidateReasoning(providerName, value string, allowed ...string) error {
+	if value == "" {
+		return nil
+	}
+	for _, candidate := range allowed {
+		if value == candidate {
+			return nil
+		}
+	}
+	return fmt.Errorf("unsupported reasoning level %q for %s (supported: %s)", value, providerName, strings.Join(allowed, ", "))
 }
 
 func DefaultString(value, fallback string) string {
@@ -132,4 +174,34 @@ func (r Registry) Names() []string {
 		names = append(names, adapter.Name())
 	}
 	return names
+}
+
+func (r Registry) Create(name string, cfg config.ProviderConfig) (Selection, error) {
+	return r.selectNamed(name, SelectOptions{
+		Config: config.Config{Provider: name, Providers: map[string]config.ProviderConfig{name: cfg}},
+		Getenv: os.Getenv,
+	})
+}
+
+type Probe struct {
+	Name      string
+	Available bool
+	Detail    string
+}
+
+func (r Registry) ProbeAll() []Probe {
+	var result []Probe
+	for _, name := range r.Names() {
+		if name == "mock" {
+			continue
+		}
+		selection, err := r.Create(name, config.ProviderConfig{})
+		if err != nil {
+			result = append(result, Probe{Name: name, Detail: err.Error()})
+			continue
+		}
+		available, detail := selection.Provider.Detect()
+		result = append(result, Probe{Name: name, Available: available, Detail: detail})
+	}
+	return result
 }
