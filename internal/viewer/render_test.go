@@ -52,7 +52,8 @@ func TestRenderEscapesHostileData(t *testing.T) {
 	if strings.Contains(html, `<img src=x onerror`) {
 		t.Fatal("hostile image tag reached HTML unescaped")
 	}
-	if strings.Count(html, "<script") != 2 {
+	// Three scripts: the head theme-stamper, the JSON island, and the viewer.
+	if strings.Count(html, "<script") != 3 {
 		t.Fatalf("unexpected script tags in output: %d", strings.Count(html, "<script"))
 	}
 	if strings.Contains(html, "mermaid") {

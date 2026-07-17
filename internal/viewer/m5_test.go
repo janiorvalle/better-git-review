@@ -135,3 +135,14 @@ func TestFileStepperWiring(t *testing.T) {
 		t.Fatalf("unexpected StepTotal: %d", page.Files[1].StepTotal)
 	}
 }
+
+func TestChromaThemeSuppressesErrorTokenColor(t *testing.T) {
+	theme, err := ChromaThemeCSS("github", "github-dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(theme.TokenCSS), ".err {") ||
+		strings.Contains(string(theme.LightVariables), "-err:") {
+		t.Fatal("Error tokens must inherit the base text color (per-fragment lexing artifacts)")
+	}
+}
