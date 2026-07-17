@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -21,6 +22,18 @@ const (
 	FoldThreshold     = 10
 	LongLineThreshold = 4_096
 )
+
+var unifiedRowsTemplate = template.Must(template.New("unified-rows").Parse(`
+<div class="view-unified diff-scroll" data-unified-ready="true">
+<table class="diff-table" aria-label="Unified diff for {{.Path}}">
+<colgroup><col class="number-column"><col class="number-column"><col class="prefix-column"><col></colgroup><tbody>
+{{range $row := .Rows}}
+{{if and $row.FoldCount $row.Hidden}}<tr class="fold-row" data-row-kind="fold" data-fold-control="{{$row.FoldID}}"><td colspan="4"><button type="button" class="fold-button" data-fold-target="{{$row.FoldID}}">↕ {{$row.FoldCount}} unmodified lines</button></td></tr>{{end}}
+{{if eq $row.Kind "hunk"}}<tr class="hunk-row" data-row-kind="hunk"><td colspan="4">@@ {{$row.Header}}</td></tr>
+{{else if eq $row.Kind "blame"}}<tr class="blame-row" data-row-kind="blame"><td colspan="4"><span class="blame-dot" aria-hidden="true"></span><span class="blame-author">{{$row.Blame.Author}}</span> · {{$row.Blame.Date}}</td></tr>
+{{else}}<tr class="line-{{$row.Class}}{{if $row.Hidden}} fold-hidden{{end}}" data-row-kind="line" data-line-class="{{$row.Class}}" data-old="{{$row.Old}}" data-new="{{$row.New}}"{{if $row.LongLine}} data-long-line="true"{{end}}{{if $row.Hidden}} data-fold-group="{{$row.FoldID}}"{{end}}><td class="line-number">{{if $row.Old}}{{$row.Old}}{{end}}</td><td class="line-number">{{if $row.New}}{{$row.New}}{{end}}</td><td class="line-prefix">{{$row.Prefix}}</td><td class="code{{if not $row.LongLine}} chroma{{end}}">{{if $row.LongLine}}<span class="long-line-note">long line</span>{{end}}{{$row.Code}}</td></tr>{{end}}
+{{end}}
+</tbody></table></div>`))
 
 type Span struct {
 	Start int
@@ -282,15 +295,26 @@ type syntaxHighlighter struct {
 	style     *chroma.Style
 }
 
+var (
+	lexerCache       sync.Map
+	sharedFormatter  = chromahtml.New(chromahtml.WithClasses(true), chromahtml.PreventSurroundingPre(true))
+	sharedLightStyle = styles.Get("github")
+)
+
 func newHighlighter(path string) *syntaxHighlighter {
 	lexer := lexers.Match(path)
 	if lexer == nil {
 		lexer = lexers.Fallback
 	}
+	key := lexer.Config().Name
+	cached, ok := lexerCache.Load(key)
+	if !ok {
+		cached, _ = lexerCache.LoadOrStore(key, chroma.Coalesce(lexer))
+	}
 	return &syntaxHighlighter{
-		lexer:     chroma.Coalesce(lexer),
-		formatter: chromahtml.New(chromahtml.WithClasses(true), chromahtml.PreventSurroundingPre(true)),
-		style:     styles.Get("github"),
+		lexer:     cached.(chroma.Lexer),
+		formatter: sharedFormatter,
+		style:     sharedLightStyle,
 	}
 }
 

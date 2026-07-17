@@ -1,6 +1,7 @@
 package viewer
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
@@ -56,5 +57,25 @@ func TestBuildPageSeparatesMechanicalFromStubbedFiles(t *testing.T) {
 	}
 	if page.MechanicalCount != 1 || len(page.MechanicalFiles) != 1 {
 		t.Fatalf("mechanical summary = %#v", page)
+	}
+}
+
+func TestPlanFullFidelityUsesRenderedSizeThenPath(t *testing.T) {
+	files := []document.File{
+		{Path: "b.go", Hunks: []document.Hunk{{Lines: []document.HunkLine{{Type: "a", New: 1, Text: "package p"}}}}},
+		{Path: "a.go", Hunks: []document.Hunk{{Lines: []document.HunkLine{{Type: "a", New: 1, Text: "package p"}}}}},
+		{Path: "large.go", Hunks: []document.Hunk{{Lines: []document.HunkLine{{Type: "a", New: 1, Text: "package " + strings.Repeat("x", 500)}}}}},
+	}
+	all, err := planFullFidelity(files, nil, 10_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget := len(all[1])
+	selected, err := planFullFidelity(files, nil, budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := selected[1]; !ok || len(selected) != 1 {
+		t.Fatalf("selected indexes = %#v, want only lexicographically first equal-size file", selected)
 	}
 }

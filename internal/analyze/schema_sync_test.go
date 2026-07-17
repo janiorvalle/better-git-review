@@ -18,6 +18,8 @@ func TestSchemaMatchesDocumentAnalysisTypes(t *testing.T) {
 	assertStructSchema(t, schema, reflect.TypeOf(document.Analysis{}), map[string]bool{
 		"stubbedFiles":    true,
 		"mechanicalFiles": true,
+		"fileKeySymbols":  true,
+		"stubbedCohorts":  true,
 	})
 
 	cohortSchema := schema.Properties["cohorts"].Items

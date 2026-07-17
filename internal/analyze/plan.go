@@ -383,6 +383,11 @@ func AssembleStagedAnalysis(
 		Cohorts:         make([]document.Cohort, len(plan.Cohorts)),
 		StubbedFiles:    []int{},
 		MechanicalFiles: append([]int{}, plan.Triage.Mechanical...),
+		FileKeySymbols:  make([][]string, len(files)),
+		StubbedCohorts:  []int{},
+	}
+	for index := range analysis.FileKeySymbols {
+		analysis.FileKeySymbols[index] = append([]string{}, summaries[index].KeySymbols...)
 	}
 	for cohortIndex, planned := range plan.Cohorts {
 		narration := narrations[cohortIndex]

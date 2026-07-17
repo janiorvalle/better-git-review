@@ -1,7 +1,7 @@
 package document
 
 const (
-	SchemaVersion = 5
+	SchemaVersion = 6
 )
 
 var Version = "dev"
@@ -57,11 +57,13 @@ type HunkLine struct {
 }
 
 type Analysis struct {
-	Title           string   `json:"title"`
-	Overview        string   `json:"overview"`
-	Cohorts         []Cohort `json:"cohorts"`
-	StubbedFiles    []int    `json:"stubbedFiles"`
-	MechanicalFiles []int    `json:"mechanicalFiles"`
+	Title           string     `json:"title"`
+	Overview        string     `json:"overview"`
+	Cohorts         []Cohort   `json:"cohorts"`
+	StubbedFiles    []int      `json:"stubbedFiles"`
+	MechanicalFiles []int      `json:"mechanicalFiles"`
+	FileKeySymbols  [][]string `json:"fileKeySymbols"`
+	StubbedCohorts  []int      `json:"stubbedCohorts"`
 }
 
 type Cohort struct {

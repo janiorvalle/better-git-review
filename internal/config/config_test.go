@@ -98,6 +98,23 @@ func TestFingerprintStableAndChanges(t *testing.T) {
 	if reasoningHash == firstHash {
 		t.Fatal("reasoning change did not change fingerprint")
 	}
+	value = second.Providers["a"]
+	value.AnalysisBudget = 900_000
+	second.Providers["a"] = value
+	budgetHash, _ := Fingerprint(second)
+	if budgetHash == reasoningHash {
+		t.Fatal("analysis budget change did not change fingerprint")
+	}
+}
+
+func TestMergeAnalysisBudgetOverride(t *testing.T) {
+	got := Merge(
+		Config{Providers: map[string]ProviderConfig{"mock": {AnalysisBudget: 400_000}}},
+		Config{Providers: map[string]ProviderConfig{"mock": {AnalysisBudget: 800_000}}},
+	)
+	if got.Providers["mock"].AnalysisBudget != 800_000 {
+		t.Fatalf("analysis budget = %d", got.Providers["mock"].AnalysisBudget)
+	}
 }
 
 func TestMergeIncludeMechanicalUsesExplicitOverride(t *testing.T) {

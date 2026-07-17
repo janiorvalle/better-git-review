@@ -77,6 +77,22 @@ func TestStagedSummaryBatchConcurrencyIsBounded(t *testing.T) {
 	}
 }
 
+func TestStubCohortNarrationIsDeterministic(t *testing.T) {
+	files := []document.File{
+		{Path: "a.go", Additions: 3, Deletions: 1},
+		{Path: "b.go", Additions: 5, Deletions: 2},
+	}
+	cohort := PlannedCohort{Title: "Backend changes", Files: []int{0, 1}}
+	first := stubCohortNarration(files, cohort)
+	second := stubCohortNarration(files, cohort)
+	if fmt.Sprint(first) != fmt.Sprint(second) ||
+		first.Title != cohort.Title ||
+		first.Narrative != "2 files, +8/-3; no model narration was available." ||
+		len(first.ReviewNotes) != 0 {
+		t.Fatalf("stub narration = %#v", first)
+	}
+}
+
 func TestStagedRetryPromptNeverExceedsPlannedBudget(t *testing.T) {
 	files := []document.File{testStageFile(0, "src/retry.go")}
 	budget := minimumStagedBudget(files) + 500

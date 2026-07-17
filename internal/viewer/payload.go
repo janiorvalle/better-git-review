@@ -20,6 +20,10 @@ func compactDiffJSON(files []document.File, views []FileView) (string, error) {
 			output.WriteByte(',')
 		}
 		output.WriteByte('[')
+		if views[fileIndex].FullFidelityHTML != "" {
+			output.WriteByte(']')
+			continue
+		}
 		for hunkIndex, hunk := range file.Hunks {
 			if hunkIndex > 0 {
 				output.WriteByte(',')

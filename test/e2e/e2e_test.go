@@ -144,7 +144,7 @@ func TestStagedHappyPath(t *testing.T) {
 	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
 	output := filepath.Join(t.TempDir(), "staged.html")
 	result := runCLI(t, env, nil,
-		"--diff", fixturePath(t), "--provider", "mock", "--out", output)
+		"--diff", fixturePath(t), "--provider", "mock", "--no-cache", "--out", output)
 	if result.err != nil {
 		t.Fatalf("staged command failed: %v\n%s", result.err, result.stderr)
 	}
@@ -157,6 +157,9 @@ func TestStagedHappyPath(t *testing.T) {
 			t.Fatalf("HTML omitted %q", file.Path)
 		}
 	}
+	if !strings.Contains(html, "mock:internal/service.go") {
+		t.Fatal("staged HTML did not render keySymbols chips")
+	}
 }
 
 func TestStagedStubDegradation(t *testing.T) {
@@ -164,7 +167,7 @@ func TestStagedStubDegradation(t *testing.T) {
 	env = setEnv(env, "BGR_MOCK_FAIL_SUMMARY", "service_test.go")
 	output := filepath.Join(t.TempDir(), "stubbed.html")
 	result := runCLI(t, env, nil,
-		"--diff", fixturePath(t), "--provider", "mock", "--out", output)
+		"--diff", fixturePath(t), "--provider", "mock", "--no-cache", "--out", output)
 	if result.err != nil {
 		t.Fatalf("stubbed command failed: %v\n%s", result.err, result.stderr)
 	}
@@ -177,6 +180,24 @@ func TestStagedStubDegradation(t *testing.T) {
 	}
 	if !strings.Contains(html, "No model summary - grouped from path only.") {
 		t.Fatal("HTML did not visibly flag the stubbed file")
+	}
+}
+
+func TestStagedNarrationStubDegradation(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	env = setEnv(env, "BGR_MOCK_FAIL_NARRATION", "internal")
+	output := filepath.Join(t.TempDir(), "stubbed-cohort.html")
+	result := runCLI(t, env, nil,
+		"--diff", fixturePath(t), "--provider", "mock", "--no-cache", "--out", output)
+	if result.err != nil {
+		t.Fatalf("narration stub command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	if len(doc.Analysis.StubbedCohorts) == 0 {
+		t.Fatal("narration failure did not populate stubbedCohorts")
+	}
+	if !strings.Contains(html, "No model narration was available for this step.") {
+		t.Fatal("HTML did not visibly flag the stubbed cohort")
 	}
 }
 
@@ -207,6 +228,62 @@ func TestStagedCostGuard(t *testing.T) {
 	if calls := strings.Count(string(log), "----- MOCK PROMPT -----"); calls != 10 {
 		t.Fatalf("actual calls = %d, guard planned 10", calls)
 	}
+}
+
+func TestBarelyStagedSmallFilesUseFullFidelity(t *testing.T) {
+	env := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "barely-staged.html")
+	result := runCLI(t, env, nil,
+		"--diff", manyFilesFixturePath(t, 154), "--provider", "mock",
+		"--no-cache", "--yes", "--out", output)
+	if result.err != nil {
+		t.Fatalf("barely staged command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	if !doc.Meta.Staged {
+		t.Fatal("154 files must use staged analysis")
+	}
+	if got := strings.Count(html, `id="fidelity-`); got != len(doc.Files) {
+		t.Fatalf("full-fidelity templates = %d, files = %d", got, len(doc.Files))
+	}
+	// The one remaining occurrence is the JavaScript string used only when a
+	// compact file is present; no rendered file body should carry the note.
+	if got := strings.Count(html, "Large diff · plain-text rendering"); got != 1 {
+		t.Fatalf("plain-text rendering marker count = %d, want only the client-side literal", got)
+	}
+}
+
+func TestAnalysisBudgetConfigChangesStagingAndTrustFlow(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	patch := filepath.Join(repo, "large.patch")
+	content := "diff --git a/large.go b/large.go\nnew file mode 100644\n--- /dev/null\n+++ b/large.go\n@@ -0,0 +1 @@\n+" +
+		strings.Repeat("x", 200_000) + "\n"
+	if err := os.WriteFile(patch, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(repo, ".better-git-review.toml")
+	if err := os.WriteFile(configPath, []byte("[providers.mock]\nanalysis_budget = 500000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "budget.json")
+	args := []string{"-C", repo, "--diff", patch, "--provider", "mock", "--format", "json", "--out", output}
+	untrusted := runCLI(t, env, nil, args...)
+	assertFailureContains(t, untrusted, "analysis_budget = 500000")
+	trusted := runCLI(t, env, nil, append(args, "--trust-repo-config")...)
+	if trusted.err != nil {
+		t.Fatalf("trusted config run failed: %v\n%s", trusted.err, trusted.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Staged {
+		t.Fatal("500000-char provider override should keep the fixture single-pass")
+	}
+
+	if err := os.WriteFile(configPath, []byte("[providers.mock]\nanalysis_budget = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tooSmall := runCLI(t, env, nil, append(args, "--trust-repo-config")...)
+	assertFailureContains(t, tooSmall, "too small for staged prompt framing")
 }
 
 func TestStagedMechanicalProvenanceIsNotStubbed(t *testing.T) {
@@ -1001,6 +1078,19 @@ func validateDocument(t *testing.T, result document.Document) {
 	if result.Analysis.MechanicalFiles == nil {
 		t.Fatal("mechanicalFiles must be present even when empty")
 	}
+	if len(result.Analysis.FileKeySymbols) != len(result.Files) {
+		t.Fatalf("fileKeySymbols length = %d, files = %d", len(result.Analysis.FileKeySymbols), len(result.Files))
+	}
+	if result.Analysis.StubbedCohorts == nil {
+		t.Fatal("stubbedCohorts must be present even when empty")
+	}
+	stubbedCohorts := map[int]bool{}
+	for _, cohortIndex := range result.Analysis.StubbedCohorts {
+		if cohortIndex < 0 || cohortIndex >= len(result.Analysis.Cohorts) || stubbedCohorts[cohortIndex] {
+			t.Fatalf("invalid stubbed cohort index %d", cohortIndex)
+		}
+		stubbedCohorts[cohortIndex] = true
+	}
 	stubbed := map[int]bool{}
 	for _, fileIndex := range result.Analysis.StubbedFiles {
 		if fileIndex < 0 || fileIndex >= len(result.Files) || stubbed[fileIndex] {
@@ -1153,7 +1243,7 @@ func isolatedEnvironment(t *testing.T) []string {
 	root := t.TempDir()
 	env := removeEnv(os.Environ(),
 		"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
-		"BGR_STAGE_BUDGET", "BGR_MOCK_FAIL_SUMMARY", "BGR_MOCK_PROMPT_LOG",
+		"BGR_STAGE_BUDGET", "BGR_MOCK_FAIL_SUMMARY", "BGR_MOCK_FAIL_NARRATION", "BGR_MOCK_PROMPT_LOG",
 		"BGR_MOCK_REASONING_LOG",
 	)
 	env = append(env,
