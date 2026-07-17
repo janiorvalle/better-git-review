@@ -222,6 +222,7 @@ button { font: inherit; }
 .tb-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .kbd-hint { color: var(--muted); opacity: .7; }
 .kbd-hint kbd { font: 10px var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 1px 4px; margin-left: 3px; background: var(--panel); }
+.file.kbd-active > .file-header { box-shadow: inset 3px 0 0 var(--accent); }
 .toolbar-right { display: inline-flex; align-items: center; gap: 12px; }
 .content { width: min(100%, 1480px); padding: 28px 36px 90px; }
 .step { display: none; }
@@ -417,7 +418,7 @@ body[data-view="split"] .view-split { display: block; }
           <button type="button" class="tb-step" id="tb-prev" aria-label="Previous step">‹</button>
           <span class="tb-count" id="tb-count"></span>
           <button type="button" class="tb-step" id="tb-next" aria-label="Next step">›</button>
-          <span class="kbd-hint" title="Arrow keys switch steps"><kbd>←</kbd><kbd>→</kbd></span>
+          <span class="kbd-hint" title="←/→ switch steps · j/k next/previous file · v toggle viewed · V mark viewed and jump to next unreviewed"><kbd>←</kbd><kbd>→</kbd><kbd>j</kbd><kbd>k</kbd><kbd>v</kbd></span>
         </div>
         <div class="theme-toggle" role="group" aria-label="Theme">
           <button type="button" data-theme-target="auto">Auto</button>
@@ -952,6 +953,7 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("step-counter").textContent = stepTitle(current);
     updatePager(steps[current]);
     applyViewed();
+    setActiveFile(null, false);
     window.scrollTo({ top: 0, behavior: "auto" });
   }
   function setView(view) {
@@ -971,20 +973,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!target) return;
     var viewedButton = target.closest(".viewed-switch");
     if (viewedButton) {
-      var fileIndex = Number(viewedButton.dataset.viewedFile);
-      var card = viewedButton.closest(".file");
-      if (viewed.has(fileIndex)) {
-        viewed.delete(fileIndex);
-        if (card) {
-          stampFile(card);
-          card.classList.remove("collapsed");
-        }
-      } else {
-        viewed.add(fileIndex);
-        if (card) card.classList.add("collapsed");
-      }
-      persistViewed();
-      applyViewed();
+      toggleViewedCard(viewedButton.closest(".file"), Number(viewedButton.dataset.viewedFile));
       return;
     }
     var jumpButton = target.closest("[data-file-jump]");
@@ -1032,10 +1021,100 @@ document.addEventListener("DOMContentLoaded", function () {
       });
     }
   });
+  function toggleViewedCard(card, fileIndex) {
+    if (!Number.isInteger(fileIndex)) return;
+    if (viewed.has(fileIndex)) {
+      viewed.delete(fileIndex);
+      if (card) {
+        stampFile(card);
+        card.classList.remove("collapsed");
+      }
+    } else {
+      viewed.add(fileIndex);
+      if (card) card.classList.add("collapsed");
+    }
+    persistViewed();
+    applyViewed();
+  }
+
+  // Keyboard review flow: j/k move between the current step's files, v
+  // toggles Viewed on the active file, V marks it viewed and jumps to the
+  // next unreviewed file. The active file follows scrolling.
+  var activeFile = null;
+  function stepFileCards() {
+    return steps[current] ? Array.prototype.slice.call(steps[current].querySelectorAll(".file")) : [];
+  }
+  // While a keyboard-initiated smooth scroll is in flight, scroll tracking
+  // must not reassign the active file: collapsed shells are short enough
+  // that several fit inside the probe, which would make j/k skip files.
+  var suppressScrollTrackingUntil = 0;
+  function setActiveFile(card, scroll) {
+    if (activeFile && activeFile !== card) activeFile.classList.remove("kbd-active");
+    activeFile = card || null;
+    if (!activeFile) return;
+    activeFile.classList.add("kbd-active");
+    if (scroll) {
+      suppressScrollTrackingUntil = Date.now() + 700;
+      activeFile.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+  function moveActiveFile(delta) {
+    var cards = stepFileCards();
+    if (!cards.length) return;
+    var position = cards.indexOf(activeFile);
+    var next = position < 0 ? (delta > 0 ? 0 : cards.length - 1) : position + delta;
+    if (next < 0 || next >= cards.length) return;
+    setActiveFile(cards[next], true);
+  }
+  function jumpToNextUnreviewed(fromCard) {
+    var cards = stepFileCards();
+    var position = cards.indexOf(fromCard);
+    for (var offset = 1; offset <= cards.length; offset++) {
+      var card = cards[(position + offset + cards.length) % cards.length];
+      if (card === fromCard) break;
+      if (!viewed.has(Number(card.dataset.file))) {
+        stampFile(card);
+        card.classList.remove("collapsed");
+        setActiveFile(card, true);
+        return;
+      }
+    }
+  }
+  var scrollTickPending = false;
+  window.addEventListener("scroll", function () {
+    if (scrollTickPending) return;
+    scrollTickPending = true;
+    requestAnimationFrame(function () {
+      scrollTickPending = false;
+      if (Date.now() < suppressScrollTrackingUntil) return;
+      var cards = stepFileCards();
+      if (!cards.length) return;
+      var probe = 80;
+      var best = cards[0];
+      for (var i = 0; i < cards.length; i++) {
+        if (cards[i].getBoundingClientRect().top <= probe) best = cards[i];
+        else break;
+      }
+      setActiveFile(best, false);
+    });
+  }, { passive: true });
+
   document.addEventListener("keydown", function (event) {
     if (event.target.matches("input, textarea, select")) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === "ArrowRight") go(current + 1);
     if (event.key === "ArrowLeft") go(current - 1);
+    if (event.key === "j") moveActiveFile(1);
+    if (event.key === "k") moveActiveFile(-1);
+    if (event.key === "v" && activeFile) {
+      toggleViewedCard(activeFile, Number(activeFile.dataset.file));
+    }
+    if (event.key === "V" && activeFile) {
+      var fromCard = activeFile;
+      var fileIndex = Number(fromCard.dataset.file);
+      if (!viewed.has(fileIndex)) toggleViewedCard(fromCard, fileIndex);
+      jumpToNextUnreviewed(fromCard);
+    }
     if (event.key === "Enter" && event.target instanceof Element) {
       var node = event.target.closest(".dg-node[data-step-target]");
       if (node) go(Number(node.getAttribute("data-step-target")));
