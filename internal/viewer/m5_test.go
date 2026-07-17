@@ -1,6 +1,7 @@
 package viewer
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -144,5 +145,62 @@ func TestChromaThemeSuppressesErrorTokenColor(t *testing.T) {
 	if strings.Contains(string(theme.TokenCSS), ".err {") ||
 		strings.Contains(string(theme.LightVariables), "-err:") {
 		t.Fatal("Error tokens must inherit the base text color (per-fragment lexing artifacts)")
+	}
+}
+
+func TestBuildDiagramHasIntrinsicPixelSize(t *testing.T) {
+	steps := []StepView{
+		{Index: 0, IsOverview: true},
+		{Index: 1, Number: 1, Title: "A", Layer: "api", FileCount: 1},
+		{Index: 2, Number: 2, Title: "B", Layer: "tests", FileCount: 1,
+			Dependencies: []DependencyView{{Title: "A", StepIndex: 1}}},
+	}
+	svg := string(BuildDiagram(steps))
+	if !strings.Contains(svg, `width="`) || !strings.Contains(svg, `height="`) {
+		t.Fatalf("svg must carry intrinsic width/height so CSS cannot blow it up: %s", svg)
+	}
+	// width and viewBox must agree (1 unit = 1 CSS px).
+	var width, height, vw, vh int
+	if _, err := fmt.Sscanf(svg[strings.Index(svg, `width="`):], `width="%d" height="%d" viewBox="0 0 %d %d"`,
+		&width, &height, &vw, &vh); err != nil {
+		t.Fatalf("could not parse svg dimensions: %v\n%s", err, svg)
+	}
+	if width != vw || height != vh {
+		t.Fatalf("intrinsic size %dx%d disagrees with viewBox %dx%d", width, height, vw, vh)
+	}
+}
+
+func TestBuildDiagramWrapsDependencyFreeStepsIntoGrid(t *testing.T) {
+	steps := []StepView{{Index: 0, IsOverview: true}}
+	for i := 1; i <= 9; i++ {
+		steps = append(steps, StepView{Index: i, Number: i, Title: fmt.Sprintf("Step %d", i), Layer: "backend", FileCount: 1})
+	}
+	svg := string(BuildDiagram(steps))
+	if strings.Count(svg, `class="dg-node`) != 9 {
+		t.Fatalf("expected 9 nodes: %s", svg)
+	}
+	if strings.Contains(svg, `class="dg-edge"`) {
+		t.Fatalf("dependency-free diagram should have no edges: %s", svg)
+	}
+	// 9 nodes wrap 3-per-row: three distinct x positions and three distinct y
+	// positions, not one 9-deep column.
+	xs, ys := map[string]bool{}, map[string]bool{}
+	rest := svg
+	for {
+		at := strings.Index(rest, `<rect x="`)
+		if at < 0 {
+			break
+		}
+		rest = rest[at:]
+		var x, y int
+		if _, err := fmt.Sscanf(rest, `<rect x="%d" y="%d"`, &x, &y); err != nil {
+			t.Fatalf("could not parse rect: %v", err)
+		}
+		xs[fmt.Sprint(x)] = true
+		ys[fmt.Sprint(y)] = true
+		rest = rest[1:]
+	}
+	if len(xs) != 3 || len(ys) != 3 {
+		t.Fatalf("expected a 3x3 grid, got %d x-positions and %d y-positions", len(xs), len(ys))
 	}
 }
