@@ -1,0 +1,18 @@
+diff --git a/src/a-consumer.ts b/src/a-consumer.ts
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/a-consumer.ts
+@@ -0,0 +1,3 @@
++import { buildMoney } from "./z-definition";
++
++export const total = buildMoney();
+diff --git a/src/z-definition.ts b/src/z-definition.ts
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/src/z-definition.ts
+@@ -0,0 +1,3 @@
++export function buildMoney() {
++  return 1;
++}

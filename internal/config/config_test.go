@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,6 +248,18 @@ func TestAnalysisFingerprintIncludesAnalysisAndGitOnly(t *testing.T) {
 	if changed == original {
 		t.Fatal("analysis change did not affect fingerprint")
 	}
+	readingOrder := base
+	readingOrder.Analysis.ReadingOrder = false
+	readingOrderHash, _ := AnalysisFingerprint(readingOrder)
+	if readingOrderHash == original {
+		t.Fatal("reading_order change did not affect fingerprint")
+	}
+	cohortDependencies := base
+	cohortDependencies.Analysis.CohortDependencies = false
+	cohortDependenciesHash, _ := AnalysisFingerprint(cohortDependencies)
+	if cohortDependenciesHash == original || cohortDependenciesHash == readingOrderHash {
+		t.Fatal("cohort_dependencies change did not independently affect fingerprint")
+	}
 	git := base
 	git.Git.ContextLines = 4
 	changed, _ = AnalysisFingerprint(git)
@@ -259,6 +272,25 @@ func TestAnalysisFingerprintIncludesAnalysisAndGitOnly(t *testing.T) {
 	unchanged, _ := AnalysisFingerprint(viewer)
 	if unchanged != original {
 		t.Fatal("viewer/media change affected analysis fingerprint")
+	}
+}
+
+func TestChangeGraphConfigDefaultsAndBooleanValidation(t *testing.T) {
+	defaults := Defaults()
+	if !defaults.Analysis.ReadingOrder || !defaults.Analysis.CohortDependencies {
+		t.Fatalf("change graph defaults = %#v", defaults.Analysis)
+	}
+	for _, key := range []string{"reading_order", "cohort_dependencies"} {
+		t.Run(key, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			contents := fmt.Sprintf("[analysis]\n%s = \"yes\"\n", key)
+			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, _, err := readConfig(path, Defaults()); err == nil {
+				t.Fatalf("non-boolean %s was accepted", key)
+			}
+		})
 	}
 }
 

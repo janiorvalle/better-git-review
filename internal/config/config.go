@@ -34,14 +34,16 @@ type Config struct {
 }
 
 type AnalysisConfig struct {
-	SummaryBatchMaxFiles int `toml:"summary_batch_max_files" json:"summaryBatchMaxFiles"`
-	StageConcurrency     int `toml:"stage_concurrency" json:"stageConcurrency"`
-	DigestMaxFiles       int `toml:"digest_max_files" json:"digestMaxFiles"`
-	DigestMaxChars       int `toml:"digest_max_chars" json:"digestMaxChars"`
-	FileDiffCap          int `toml:"file_diff_cap" json:"fileDiffCap"`
-	GuardCallThreshold   int `toml:"guard_call_threshold" json:"guardCallThreshold"`
-	StagingMaxFiles      int `toml:"staging_max_files" json:"stagingMaxFiles"`
-	FidelityBudget       int `toml:"fidelity_budget" json:"fidelityBudget"`
+	SummaryBatchMaxFiles int  `toml:"summary_batch_max_files" json:"summaryBatchMaxFiles"`
+	StageConcurrency     int  `toml:"stage_concurrency" json:"stageConcurrency"`
+	DigestMaxFiles       int  `toml:"digest_max_files" json:"digestMaxFiles"`
+	DigestMaxChars       int  `toml:"digest_max_chars" json:"digestMaxChars"`
+	FileDiffCap          int  `toml:"file_diff_cap" json:"fileDiffCap"`
+	GuardCallThreshold   int  `toml:"guard_call_threshold" json:"guardCallThreshold"`
+	StagingMaxFiles      int  `toml:"staging_max_files" json:"stagingMaxFiles"`
+	FidelityBudget       int  `toml:"fidelity_budget" json:"fidelityBudget"`
+	ReadingOrder         bool `toml:"reading_order" json:"readingOrder"`
+	CohortDependencies   bool `toml:"cohort_dependencies" json:"cohortDependencies"`
 }
 
 type ViewerConfig struct {
@@ -92,6 +94,7 @@ func Defaults() Config {
 			SummaryBatchMaxFiles: 25, StageConcurrency: 4, DigestMaxFiles: 40,
 			DigestMaxChars: 60_000, FileDiffCap: 12_000, GuardCallThreshold: 5,
 			StagingMaxFiles: 150, FidelityBudget: 4_000_000,
+			ReadingOrder: true, CohortDependencies: true,
 		},
 		Viewer: ViewerConfig{
 			CollapseThreshold: 400, FoldThreshold: 10, FoldContext: 3,

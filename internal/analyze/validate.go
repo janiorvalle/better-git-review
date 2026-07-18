@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/janiorvalle/better-git-review/internal/changegraph"
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
-func ApplySeatbelts(analysis document.Analysis, fileCount int) document.Analysis {
+func ApplySeatbelts(analysis document.Analysis, files []document.File, readingOrder bool) document.Analysis {
+	fileCount := len(files)
 	analysis.StubbedFiles = []int{}
 	analysis.MechanicalFiles = []int{}
 	analysis.FileKeySymbols = make([][]string, fileCount)
@@ -83,8 +85,29 @@ func ApplySeatbelts(analysis document.Analysis, fileCount int) document.Analysis
 			DependsOn:     []int{},
 		})
 	}
+	if readingOrder {
+		edges := changegraph.Build(files)
+		for index := range normalized {
+			reorderCohort(&normalized[index], edges)
+		}
+	}
 	analysis.Cohorts = normalized
 	return analysis
+}
+
+func reorderCohort(cohort *document.Cohort, edges []changegraph.Edge) {
+	ordered := changegraph.StableOrder(cohort.Files, edges)
+	if len(ordered) != len(cohort.Files) {
+		return
+	}
+	summaries := make(map[int]string, len(cohort.Files))
+	for position, fileIndex := range cohort.Files {
+		summaries[fileIndex] = cohort.FileSummaries[position]
+	}
+	cohort.Files = ordered
+	for position, fileIndex := range ordered {
+		cohort.FileSummaries[position] = summaries[fileIndex]
+	}
 }
 
 func Validate(analysis document.Analysis, fileCount int) []string {
