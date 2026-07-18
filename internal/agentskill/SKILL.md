@@ -91,6 +91,9 @@ report findings grouped by cohort.
   `.better-git-review.toml` provider settings, the next run will prompt —
   or fail in non-TTY. Pass `--trust-repo-config` (or `--yes`) on that next
   run, and say so in your report.
+- User config can disable deterministic graph enhancements with
+  `[analysis] reading_order = false` or `cohort_dependencies = false`;
+  both default to true and are user-config only.
 
 ## Providers
 

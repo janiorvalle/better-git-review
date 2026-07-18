@@ -131,7 +131,7 @@ func Run(ctx context.Context, opts Options) (document.Analysis, error) {
 	if err != nil {
 		return document.Analysis{}, analysisFailure(opts.StateDir, raw, validationErrors, err)
 	}
-	analysis = ApplySeatbelts(analysis, len(opts.Files))
+	analysis = ApplySeatbelts(analysis, opts.Files, opts.Settings.ReadingOrder)
 	if validationErrors := ValidateComplete(analysis, len(opts.Files)); len(validationErrors) > 0 {
 		return document.Analysis{}, analysisFailure(opts.StateDir, raw, validationErrors, nil)
 	}

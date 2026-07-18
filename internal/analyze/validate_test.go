@@ -66,7 +66,7 @@ func TestApplySeatbelts(t *testing.T) {
 			FileSummaries: []string{"bad"},
 		},
 	}}
-	got := ApplySeatbelts(analysis, 3)
+	got := ApplySeatbelts(analysis, make([]document.File, 3), false)
 	if len(got.Cohorts) != 2 {
 		t.Fatalf("got %d cohorts, want 2: %#v", len(got.Cohorts), got.Cohorts)
 	}
@@ -101,9 +101,25 @@ func TestApplySeatbeltsRemapsDependenciesAfterDroppingCohorts(t *testing.T) {
 			FileSummaries: []string{"tests"}, DependsOn: []int{1},
 		},
 	}}
-	got := ApplySeatbelts(analysis, 2)
+	got := ApplySeatbelts(analysis, make([]document.File, 2), false)
 	if len(got.Cohorts) != 2 || !slices.Equal(got.Cohorts[1].DependsOn, []int{0}) {
 		t.Fatalf("dependencies were not remapped: %#v", got.Cohorts)
+	}
+}
+
+func TestApplySeatbeltsOrdersFilesAndParallelSummaries(t *testing.T) {
+	files := []document.File{
+		graphTestFile("src/a-consumer.ts", `import { buildMoney } from "./z-definition"`),
+		graphTestFile("src/z-definition.ts", `export function buildMoney() { return 1 }`),
+	}
+	analysis := document.Analysis{Cohorts: []document.Cohort{{
+		Title: "Backend", Layer: "backend", Files: []int{0, 1},
+		FileSummaries: []string{"consumer", "definition"}, ReviewNotes: []string{}, DependsOn: []int{},
+	}}}
+	got := ApplySeatbelts(analysis, files, true)
+	if !slices.Equal(got.Cohorts[0].Files, []int{1, 0}) ||
+		!slices.Equal(got.Cohorts[0].FileSummaries, []string{"definition", "consumer"}) {
+		t.Fatalf("ordered cohort = %#v", got.Cohorts[0])
 	}
 }
 

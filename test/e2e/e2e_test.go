@@ -208,6 +208,118 @@ func TestStagedHappyPath(t *testing.T) {
 	}
 }
 
+func TestReadingOrderRendersDefinitionBeforeImporter(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "reading-order.html")
+	result := runCLI(t, isolatedEnvironment(t), nil,
+		"--diff", readingOrderFixturePath(t), "--provider", "mock", "--no-cache", "--out", output)
+	if result.err != nil {
+		t.Fatalf("reading-order command failed: %v\n%s", result.err, result.stderr)
+	}
+	_, doc := readHTMLDocument(t, output)
+	definition := fileIndexByPath(t, doc, "src/z-definition.ts")
+	importer := fileIndexByPath(t, doc, "src/a-consumer.ts")
+	for _, cohort := range doc.Analysis.Cohorts {
+		definitionPosition := slices.Index(cohort.Files, definition)
+		importerPosition := slices.Index(cohort.Files, importer)
+		if definitionPosition >= 0 && importerPosition >= 0 {
+			if definitionPosition >= importerPosition {
+				t.Fatalf("definition did not render first: %#v", cohort.Files)
+			}
+			return
+		}
+	}
+	t.Fatal("definition and importer were not rendered in one cohort")
+}
+
+func TestStagedChangeGraphPopulatesDiagramDependencies(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	output := filepath.Join(t.TempDir(), "changegraph-staged.html")
+	result := runCLI(t, env, nil,
+		"--diff", changeGraphStagedFixturePath(t), "--provider", "mock",
+		"--no-cache", "--yes", "--out", output)
+	if result.err != nil {
+		t.Fatalf("staged changegraph command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	if !doc.Meta.Staged {
+		t.Fatal("changegraph fixture did not use staged analysis")
+	}
+	edgeCount := 0
+	for cohortIndex, cohort := range doc.Analysis.Cohorts {
+		if len(cohort.DependsOn) > 3 {
+			t.Fatalf("cohort %d has %d inbound dependencies", cohortIndex, len(cohort.DependsOn))
+		}
+		for _, dependency := range cohort.DependsOn {
+			if dependency >= cohortIndex {
+				t.Fatalf("cohort %d has non-earlier dependency %d", cohortIndex, dependency)
+			}
+			edgeCount++
+		}
+	}
+	if edgeCount == 0 || !strings.Contains(html, `class="dg-edge"`) {
+		t.Fatalf("staged diagram has no dependency edges: count=%d", edgeCount)
+	}
+	consumer := fileIndexByPath(t, doc, "e-consumer/consumer.ts")
+	for _, cohort := range doc.Analysis.Cohorts {
+		if slices.Contains(cohort.Files, consumer) {
+			if !slices.Equal(cohort.DependsOn, []int{0, 1, 2}) {
+				t.Fatalf("top-three dependency ranking = %#v", cohort.DependsOn)
+			}
+			return
+		}
+	}
+	t.Fatal("consumer cohort not found")
+}
+
+func TestChangeGraphAnalysisIsByteDeterministic(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	firstPath := filepath.Join(t.TempDir(), "first.json")
+	secondPath := filepath.Join(t.TempDir(), "second.json")
+	args := []string{
+		"--diff", changeGraphStagedFixturePath(t), "--provider", "mock",
+		"--no-cache", "--yes", "--format", "json",
+	}
+	first := runCLI(t, env, nil, append(args, "--out", firstPath)...)
+	second := runCLI(t, env, nil, append(args, "--out", secondPath)...)
+	if first.err != nil || second.err != nil {
+		t.Fatalf("determinism runs failed: first=%v second=%v\n%s\n%s", first.err, second.err, first.stderr, second.stderr)
+	}
+	firstJSON, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondJSON, err := os.ReadFile(secondPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstJSON, secondJSON) {
+		t.Fatal("two changegraph runs produced different analysis JSON")
+	}
+}
+
+func TestDefaultGraphSettingsLeaveEdgeFreeOutputByteIdentical(t *testing.T) {
+	env := isolatedEnvironment(t)
+	defaultPath := filepath.Join(t.TempDir(), "default.json")
+	disabledPath := filepath.Join(t.TempDir(), "disabled.json")
+	args := []string{
+		"--diff", fixturePath(t), "--provider", "mock", "--no-cache", "--format", "json",
+	}
+	defaultRun := runCLI(t, env, nil, append(args, "--out", defaultPath)...)
+	if defaultRun.err != nil {
+		t.Fatalf("default graph run failed: %v\n%s", defaultRun.err, defaultRun.stderr)
+	}
+	writeE2EConfig(t, env, "[analysis]\nreading_order = false\ncohort_dependencies = false\n")
+	disabledRun := runCLI(t, env, nil, append(args, "--out", disabledPath)...)
+	if disabledRun.err != nil {
+		t.Fatalf("disabled graph run failed: %v\n%s", disabledRun.err, disabledRun.stderr)
+	}
+	defaultJSON, _ := os.ReadFile(defaultPath)
+	disabledJSON, _ := os.ReadFile(disabledPath)
+	if !bytes.Equal(defaultJSON, disabledJSON) {
+		t.Fatal("default-on graph settings changed an edge-free analysis")
+	}
+}
+
 func TestStagedStubDegradation(t *testing.T) {
 	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
 	env = setEnv(env, "BGR_MOCK_FAIL_SUMMARY", "service_test.go")
@@ -660,6 +772,34 @@ func TestCacheDoesNotCrossAnalysisStrategies(t *testing.T) {
 	}
 	if doc := readAndValidate(t, output); doc.Meta.Staged || !doc.Meta.Cached {
 		t.Fatalf("staged cache crossed into single-pass run: %#v", doc.Meta)
+	}
+}
+
+func TestCacheDoesNotCrossChangeGraphSettings(t *testing.T) {
+	env := isolatedEnvironment(t)
+	output := filepath.Join(t.TempDir(), "graph-cache.json")
+	args := []string{
+		"--diff", fixturePath(t), "--provider", "mock", "--format", "json", "--out", output,
+	}
+	first := runCLI(t, env, nil, args...)
+	if first.err != nil {
+		t.Fatalf("default graph run failed: %v\n%s", first.err, first.stderr)
+	}
+	writeE2EConfig(t, env, "[analysis]\nreading_order = false\n")
+	readingOff := runCLI(t, env, nil, args...)
+	if readingOff.err != nil {
+		t.Fatalf("reading_order=false run failed: %v\n%s", readingOff.err, readingOff.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Cached {
+		t.Fatal("reading_order=false reused the default analysis cache")
+	}
+	writeE2EConfig(t, env, "[analysis]\nreading_order = false\ncohort_dependencies = false\n")
+	dependenciesOff := runCLI(t, env, nil, args...)
+	if dependenciesOff.err != nil {
+		t.Fatalf("cohort_dependencies=false run failed: %v\n%s", dependenciesOff.err, dependenciesOff.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Cached {
+		t.Fatal("cohort_dependencies=false reused the reading_order-only cache")
 	}
 }
 
@@ -1340,6 +1480,24 @@ func stagedFixturePath(t *testing.T) string {
 	return path
 }
 
+func readingOrderFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "reading-order.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func changeGraphStagedFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "changegraph-staged.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func manyFilesFixturePath(t *testing.T, count int) string {
 	t.Helper()
 	var patch strings.Builder
@@ -1481,4 +1639,15 @@ func assertFailureContains(t *testing.T, result commandResult, text string) {
 	if !strings.Contains(result.stderr, text) {
 		t.Fatalf("stderr %q does not contain %q", result.stderr, text)
 	}
+}
+
+func fileIndexByPath(t *testing.T, doc document.Document, path string) int {
+	t.Helper()
+	for index, file := range doc.Files {
+		if file.Path == path {
+			return index
+		}
+	}
+	t.Fatalf("file %q not found", path)
+	return -1
 }

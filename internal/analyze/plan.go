@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/janiorvalle/better-git-review/internal/changegraph"
 	"github.com/janiorvalle/better-git-review/internal/document"
 	"github.com/janiorvalle/better-git-review/internal/pathlayer"
 	"github.com/janiorvalle/better-git-review/internal/provider"
@@ -44,6 +45,7 @@ type StagedPlan struct {
 	Cohorts        []PlannedCohort
 	SummaryBatches []SummaryBatch
 	Calls          int
+	edges          []changegraph.Edge
 	settings       Settings
 }
 
@@ -54,6 +56,8 @@ type Settings struct {
 	DigestMaxChars       int
 	FileDiffCap          int
 	StagingMaxFiles      int
+	ReadingOrder         bool
+	CohortDependencies   bool
 }
 
 func DefaultSettings() Settings {
@@ -61,6 +65,7 @@ func DefaultSettings() Settings {
 		SummaryBatchMaxFiles: SummaryBatchMaxFiles, StageConcurrency: StageConcurrency,
 		DigestMaxFiles: DigestMaxFiles, DigestMaxChars: DigestMaxChars,
 		FileDiffCap: maxFileDiffCap, StagingMaxFiles: CohortMaxFiles,
+		ReadingOrder: true, CohortDependencies: true,
 	}
 }
 
@@ -74,12 +79,22 @@ func PlanStagedWithSettings(files []document.File, generated map[int]bool, inclu
 	}
 	triage := Triage(files, generated, includeMechanical)
 	cohorts := PlanCohortsWithMax(files, settings.StagingMaxFiles)
+	var edges []changegraph.Edge
+	if settings.ReadingOrder || settings.CohortDependencies {
+		edges = changegraph.Build(files)
+	}
+	if settings.ReadingOrder {
+		for index := range cohorts {
+			cohorts[index].Files = changegraph.StableOrder(cohorts[index].Files, edges)
+		}
+	}
 	batches := PlanSummaryBatchesWithSettings(files, triage.ReviewWorthy, budget, settings)
 	return StagedPlan{
 		Triage:         triage,
 		Cohorts:        cohorts,
 		SummaryBatches: batches,
 		Calls:          len(batches) + len(cohorts) + 1,
+		edges:          edges,
 		settings:       settings,
 	}
 }
@@ -419,6 +434,18 @@ func AssembleStagedAnalysis(
 	narrations []CohortNarration,
 	synthesis Synthesis,
 ) document.Analysis {
+	cohortFiles := make([][]int, len(plan.Cohorts))
+	for index, cohort := range plan.Cohorts {
+		cohortFiles[index] = cohort.Files
+	}
+	dependencies := make([][]int, len(plan.Cohorts))
+	if plan.settings.CohortDependencies {
+		dependencies = changegraph.CohortDependencies(cohortFiles, plan.edges)
+	} else {
+		for index := range dependencies {
+			dependencies[index] = []int{}
+		}
+	}
 	analysis := document.Analysis{
 		Title:           synthesis.Title,
 		Overview:        synthesis.Overview,
@@ -438,7 +465,7 @@ func AssembleStagedAnalysis(
 			Narrative: narration.Narrative, Files: append([]int(nil), planned.Files...),
 			FileSummaries: make([]string, len(planned.Files)),
 			ReviewNotes:   append([]string{}, narration.ReviewNotes...),
-			DependsOn:     []int{},
+			DependsOn:     dependencies[cohortIndex],
 		}
 		for position, fileIndex := range planned.Files {
 			cohort.FileSummaries[position] = summaries[fileIndex].Summary

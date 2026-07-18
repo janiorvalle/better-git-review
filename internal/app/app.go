@@ -750,6 +750,7 @@ func analysisSettings(cfg config.Config) analyze.Settings {
 		SummaryBatchMaxFiles: value.SummaryBatchMaxFiles, StageConcurrency: value.StageConcurrency,
 		DigestMaxFiles: value.DigestMaxFiles, DigestMaxChars: value.DigestMaxChars,
 		FileDiffCap: value.FileDiffCap, StagingMaxFiles: value.StagingMaxFiles,
+		ReadingOrder: value.ReadingOrder, CohortDependencies: value.CohortDependencies,
 	}
 }
 

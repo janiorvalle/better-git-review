@@ -1,11 +1,13 @@
 package analyze
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/janiorvalle/better-git-review/internal/changegraph"
 	"github.com/janiorvalle/better-git-review/internal/document"
 )
 
@@ -134,6 +136,24 @@ func TestPlanCohortsSplitsNestedAndFlatDirectories(t *testing.T) {
 	}
 }
 
+func TestPlanStagedOrdersDefinitionBeforeImporter(t *testing.T) {
+	files := []document.File{
+		graphTestFile("src/a-consumer.ts", `import { buildMoney } from "./z-definition"`, `buildMoney()`),
+		graphTestFile("src/z-definition.ts", `export function buildMoney() { return 1 }`),
+	}
+	plan := PlanStaged(files, nil, false, DefaultStageBudget)
+	if len(plan.Cohorts) != 1 || !slices.Equal(plan.Cohorts[0].Files, []int{1, 0}) {
+		t.Fatalf("cohort order = %#v", plan.Cohorts)
+	}
+
+	settings := DefaultSettings()
+	settings.ReadingOrder = false
+	disabled := PlanStagedWithSettings(files, nil, false, DefaultStageBudget, settings)
+	if !slices.Equal(disabled.Cohorts[0].Files, []int{0, 1}) {
+		t.Fatalf("disabled reading order = %#v", disabled.Cohorts[0].Files)
+	}
+}
+
 func TestCohortDigestPrioritizesFlaggedFilesWithoutGatingAnalysis(t *testing.T) {
 	files := []document.File{
 		{Path: "src/large.go", Additions: 100},
@@ -211,4 +231,79 @@ func TestAssembleStagedAnalysisPopulatesKeySymbolsByProvenance(t *testing.T) {
 		len(analysis.FileKeySymbols[1]) != 0 || len(analysis.FileKeySymbols[2]) != 0 {
 		t.Fatalf("fileKeySymbols = %#v", analysis.FileKeySymbols)
 	}
+}
+
+func TestAssembleStagedAnalysisPopulatesCappedEarlierDependencies(t *testing.T) {
+	files := []document.File{{Path: "a.ts"}, {Path: "b.ts"}, {Path: "c.ts"}, {Path: "d.ts"}, {Path: "e.ts"}}
+	plan := StagedPlan{
+		Cohorts: []PlannedCohort{
+			{Layer: "backend", Files: []int{0}},
+			{Layer: "backend", Files: []int{1}},
+			{Layer: "backend", Files: []int{2}},
+			{Layer: "backend", Files: []int{3}},
+			{Layer: "backend", Files: []int{4}},
+		},
+		edges: []changegraph.Edge{
+			{Importer: 4, Imported: 0}, {Importer: 4, Imported: 1},
+			{Importer: 4, Imported: 2}, {Importer: 4, Imported: 3},
+			{Importer: 1, Imported: 4},
+		},
+		settings: Settings{CohortDependencies: true},
+	}
+	summaries := make([]FileSummary, len(files))
+	for index := range summaries {
+		summaries[index] = FileSummary{Summary: "summary", KeySymbols: []string{}}
+	}
+	narrations := make([]CohortNarration, len(plan.Cohorts))
+	for index := range narrations {
+		narrations[index] = CohortNarration{
+			Title: "Changes", Intent: "Review.", Narrative: "Review changes.", ReviewNotes: []string{},
+		}
+	}
+	analysis := AssembleStagedAnalysis(files, plan, summaries, narrations, Synthesis{Title: "Change", Overview: "Overview"})
+	if !slices.Equal(analysis.Cohorts[4].DependsOn, []int{0, 1, 2}) {
+		t.Fatalf("dependencies = %#v", analysis.Cohorts[4].DependsOn)
+	}
+	for index := 0; index < 4; index++ {
+		if len(analysis.Cohorts[index].DependsOn) != 0 {
+			t.Fatalf("cohort %d dependencies = %#v", index, analysis.Cohorts[index].DependsOn)
+		}
+	}
+	plan.settings.CohortDependencies = false
+	disabled := AssembleStagedAnalysis(files, plan, summaries, narrations, Synthesis{Title: "Change", Overview: "Overview"})
+	for index, cohort := range disabled.Cohorts {
+		if len(cohort.DependsOn) != 0 {
+			t.Fatalf("disabled cohort %d dependencies = %#v", index, cohort.DependsOn)
+		}
+	}
+}
+
+func TestDefaultGraphSettingsLeaveEdgeFreeStagedJSONUnchanged(t *testing.T) {
+	files := []document.File{{Path: "src/a.go"}, {Path: "src/b.go"}}
+	settingsOff := DefaultSettings()
+	settingsOff.ReadingOrder = false
+	settingsOff.CohortDependencies = false
+	offPlan := PlanStagedWithSettings(files, nil, false, DefaultStageBudget, settingsOff)
+	onPlan := PlanStaged(files, nil, false, DefaultStageBudget)
+	summaries := []FileSummary{
+		{Summary: "a", KeySymbols: []string{}},
+		{Summary: "b", KeySymbols: []string{}},
+	}
+	narrations := []CohortNarration{{
+		Title: "Changes", Intent: "Review.", Narrative: "Review changes.", ReviewNotes: []string{},
+	}}
+	synthesis := Synthesis{Title: "Change", Overview: "Overview"}
+	offJSON, _ := json.Marshal(AssembleStagedAnalysis(files, offPlan, summaries, narrations, synthesis))
+	onJSON, _ := json.Marshal(AssembleStagedAnalysis(files, onPlan, summaries, narrations, synthesis))
+	if string(onJSON) != string(offJSON) {
+		t.Fatalf("edge-free output changed:\noff: %s\n on: %s", offJSON, onJSON)
+	}
+}
+
+func graphTestFile(path string, lines ...string) document.File {
+	hunkLines := make([]document.HunkLine, len(lines))
+	for index, line := range lines {
+		hunkLines[index] = document.HunkLine{Type: "a", Text: line}
+	}
+	return document.File{Path: path, Additions: len(lines), Hunks: []document.Hunk{{Lines: hunkLines}}}
 }

@@ -141,6 +141,8 @@ file_diff_cap = 12000
 guard_call_threshold = 5
 staging_max_files = 150
 fidelity_budget = 4000000
+reading_order = true
+cohort_dependencies = true
 
 [viewer]
 collapse_threshold = 400
@@ -216,6 +218,10 @@ to deterministic directory cohorts, each cohort gets one bounded
 narration, and one final call synthesizes the overview. `--include-mechanical`
 or `include_mechanical = true` opts every file back into model analysis.
 The HTML always carries the complete diffs either way.
+
+An added-line change graph puts changed definitions before their importers
+within each review step. On staged runs, the same graph adds up to three
+earlier-step dependencies so the overview diagram shows how the work builds.
 
 On Git 2.40 and newer, generated-file detection reads `.gitattributes` from
 the reviewed commit; older Git falls back to the worktree's attributes. If
