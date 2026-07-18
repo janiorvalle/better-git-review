@@ -1,0 +1,31 @@
+diff --git a/web/a-screen.tsx b/web/a-screen.tsx
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/web/a-screen.tsx
+@@ -0,0 +1,4 @@
++import { Button } from "./z-Button";
++import "./z-styles.css";
++export const Screen = () => Button;
++
+diff --git a/web/z-Button.android.tsx b/web/z-Button.android.tsx
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/web/z-Button.android.tsx
+@@ -0,0 +1 @@
++export const Button = "android";
+diff --git a/web/z-Button.ios.tsx b/web/z-Button.ios.tsx
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/web/z-Button.ios.tsx
+@@ -0,0 +1 @@
++export const Button = "ios";
+diff --git a/web/z-styles.css b/web/z-styles.css
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/web/z-styles.css
+@@ -0,0 +1 @@
++.screen { display: flex; }
