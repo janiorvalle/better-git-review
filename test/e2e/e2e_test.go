@@ -415,6 +415,109 @@ func TestDefaultGraphSettingsLeaveEdgeFreeJavaOutputByteIdentical(t *testing.T) 
 	}
 }
 
+func TestStagedHCLChangeGraphPopulatesDependenciesAndOrdersDefinitions(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	output := filepath.Join(t.TempDir(), "changegraph-hcl-staged.html")
+	result := runCLI(t, env, nil,
+		"--diff", changeGraphHCLStagedFixturePath(t), "--provider", "mock",
+		"--no-cache", "--yes", "--out", output)
+	if result.err != nil {
+		t.Fatalf("staged HCL changegraph command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	if !doc.Meta.Staged {
+		t.Fatal("HCL changegraph fixture did not use staged analysis")
+	}
+	edgeCount := 0
+	for cohortIndex, cohort := range doc.Analysis.Cohorts {
+		for _, dependency := range cohort.DependsOn {
+			if dependency >= cohortIndex {
+				t.Fatalf("cohort %d has non-earlier dependency %d", cohortIndex, dependency)
+			}
+			edgeCount++
+		}
+	}
+	if edgeCount == 0 || !strings.Contains(html, `class="dg-edge"`) {
+		t.Fatalf("staged HCL diagram has no dependency edges: count=%d", edgeCount)
+	}
+	definition := fileIndexByPath(t, doc, "c-app/z-definitions.tf")
+	consumer := fileIndexByPath(t, doc, "c-app/a-consumer.tf")
+	assertFilesOrderedInOneCohort(t, doc, []int{definition}, consumer)
+}
+
+func TestAssetChangeGraphOrdersCSSAndPlatformVariantsBeforeImporter(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "changegraph-assets.html")
+	result := runCLI(t, isolatedEnvironment(t), nil,
+		"--diff", changeGraphAssetsFixturePath(t), "--provider", "mock",
+		"--no-cache", "--out", output)
+	if result.err != nil {
+		t.Fatalf("asset changegraph command failed: %v\n%s", result.err, result.stderr)
+	}
+	_, doc := readHTMLDocument(t, output)
+	importer := fileIndexByPath(t, doc, "web/a-screen.tsx")
+	dependencies := []int{
+		fileIndexByPath(t, doc, "web/z-Button.android.tsx"),
+		fileIndexByPath(t, doc, "web/z-Button.ios.tsx"),
+		fileIndexByPath(t, doc, "web/z-styles.css"),
+	}
+	assertFilesOrderedInOneCohort(t, doc, dependencies, importer)
+}
+
+func TestHCLChangeGraphAnalysisIsByteDeterministic(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	firstPath := filepath.Join(t.TempDir(), "first.json")
+	secondPath := filepath.Join(t.TempDir(), "second.json")
+	args := []string{
+		"--diff", changeGraphHCLStagedFixturePath(t), "--provider", "mock",
+		"--no-cache", "--yes", "--format", "json",
+	}
+	first := runCLI(t, env, nil, append(args, "--out", firstPath)...)
+	second := runCLI(t, env, nil, append(args, "--out", secondPath)...)
+	if first.err != nil || second.err != nil {
+		t.Fatalf("HCL determinism runs failed: first=%v second=%v\n%s\n%s", first.err, second.err, first.stderr, second.stderr)
+	}
+	firstJSON, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondJSON, err := os.ReadFile(secondPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstJSON, secondJSON) {
+		t.Fatal("two HCL changegraph runs produced different analysis JSON")
+	}
+}
+
+func TestDefaultGraphSettingsLeaveEdgeFreeHCLOutputByteIdentical(t *testing.T) {
+	env := isolatedEnvironment(t)
+	defaultPath := filepath.Join(t.TempDir(), "default.json")
+	disabledPath := filepath.Join(t.TempDir(), "disabled.json")
+	args := []string{
+		"--diff", edgeFreeHCLFixturePath(t), "--provider", "mock", "--no-cache", "--format", "json",
+	}
+	defaultRun := runCLI(t, env, nil, append(args, "--out", defaultPath)...)
+	if defaultRun.err != nil {
+		t.Fatalf("default HCL graph run failed: %v\n%s", defaultRun.err, defaultRun.stderr)
+	}
+	writeE2EConfig(t, env, "[analysis]\nreading_order = false\ncohort_dependencies = false\n")
+	disabledRun := runCLI(t, env, nil, append(args, "--out", disabledPath)...)
+	if disabledRun.err != nil {
+		t.Fatalf("disabled HCL graph run failed: %v\n%s", disabledRun.err, disabledRun.stderr)
+	}
+	defaultJSON, err := os.ReadFile(defaultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledJSON, err := os.ReadFile(disabledPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(defaultJSON, disabledJSON) {
+		t.Fatal("default-on graph settings changed an edge-free HCL analysis")
+	}
+}
+
 func TestStagedStubDegradation(t *testing.T) {
 	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
 	env = setEnv(env, "BGR_MOCK_FAIL_SUMMARY", "service_test.go")
@@ -1600,6 +1703,64 @@ func changeGraphJVMStagedFixturePath(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func changeGraphHCLStagedFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "changegraph-hcl-staged.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func changeGraphAssetsFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "changegraph-assets.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func edgeFreeHCLFixturePath(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "edge-free-hcl.patch")
+	const content = `diff --git a/terraform/main.tf b/terraform/main.tf
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/terraform/main.tf
+@@ -0,0 +1,3 @@
++terraform {
++  required_version = ">= 1.7"
++}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func assertFilesOrderedInOneCohort(t *testing.T, doc document.Document, dependencies []int, importer int) {
+	t.Helper()
+	for _, cohort := range doc.Analysis.Cohorts {
+		importerPosition := slices.Index(cohort.Files, importer)
+		if importerPosition < 0 {
+			continue
+		}
+		for _, dependency := range dependencies {
+			position := slices.Index(cohort.Files, dependency)
+			if position < 0 {
+				t.Fatalf("dependency %d was not rendered with importer %d", dependency, importer)
+			}
+			if position >= importerPosition {
+				t.Fatalf("dependency %d did not render before importer %d: %#v", dependency, importer, cohort.Files)
+			}
+		}
+		return
+	}
+	t.Fatalf("importer %d was not rendered in any cohort", importer)
 }
 
 func edgeFreeJavaFixturePath(t *testing.T) string {

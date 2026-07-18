@@ -20,7 +20,8 @@ var (
 	jsFromLineStart     = regexp.MustCompile(`^\s*from\b`)
 	jsQuotedSpecifier   = regexp.MustCompile(`^\s*["']([^"']+)["']`)
 	jsImportStart       = regexp.MustCompile(`^\s*import\b`)
-	jsSideEffectImport  = regexp.MustCompile(`^\s*import\s*["']`)
+	jsBareImportStart   = regexp.MustCompile(`^\s*import\s*$`)
+	jsSideEffectImport  = regexp.MustCompile(`^\s*import\s*["']([^"']+)["']`)
 	jsExportFromStart   = regexp.MustCompile(`^\s*export\s+(?:type\s+)?(?:\{|\*)`)
 	jsRequirePattern    = regexp.MustCompile(`(?:^\s*|[=(:,]\s*|\breturn\s+)require\s*\(\s*["']([^"']+)["']\s*\)`)
 	goImportPattern     = regexp.MustCompile(`^\s*import\s+(?:[._A-Za-z][A-Za-z0-9_]*\s+)?["\x60]([^"\x60]+)["\x60]`)
@@ -51,7 +52,7 @@ func Build(files []document.File) []Edge {
 			continue
 		}
 		lines := addedLines(file)
-		for _, specifier := range importSpecifiers(language, lines) {
+		for _, specifier := range importSpecifiers(language, file, lines) {
 			for _, imported := range resolver.resolve(fileIndex, language, specifier) {
 				if imported != fileIndex {
 					edges[[2]int{fileIndex, imported}] = true
@@ -65,6 +66,11 @@ func Build(files []document.File) []Edge {
 				}
 				definitions[symbol][fileIndex] = true
 			}
+		}
+	}
+	for _, edge := range terraformEdges(files) {
+		if edge.Importer != edge.Imported {
+			edges[[2]int{edge.Importer, edge.Imported}] = true
 		}
 	}
 
@@ -115,6 +121,34 @@ func addedLines(file document.File) []string {
 	return lines
 }
 
+func addedLineRuns(file document.File) [][]string {
+	var runs [][]string
+	for _, hunk := range file.Hunks {
+		var run []string
+		lastNew := 0
+		flush := func() {
+			if len(run) > 0 {
+				runs = append(runs, run)
+				run = nil
+			}
+			lastNew = 0
+		}
+		for _, line := range hunk.Lines {
+			if line.Type != "a" {
+				flush()
+				continue
+			}
+			if len(run) > 0 && lastNew > 0 && line.New > 0 && line.New != lastNew+1 {
+				flush()
+			}
+			run = append(run, line.Text)
+			lastNew = line.New
+		}
+		flush()
+	}
+	return runs
+}
+
 func languageForPath(filePath string) string {
 	switch strings.ToLower(path.Ext(filePath)) {
 	case ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts":
@@ -127,18 +161,95 @@ func languageForPath(filePath string) string {
 		return "java"
 	case ".kt", ".kts":
 		return "kotlin"
+	case ".tf":
+		return "terraform"
+	case ".html", ".htm":
+		return "html"
+	case ".css":
+		return "css"
 	default:
 		return ""
 	}
 }
 
-func importSpecifiers(language string, lines []string) []string {
+func importSpecifiers(language string, file document.File, lines []string) []string {
 	var result []string
 	if language == "javascript" {
-		return javascriptImportSpecifiers(lines)
+		for _, run := range addedLineRuns(file) {
+			result = append(result, javascriptImportSpecifiers(stripJSImportComments(run))...)
+		}
+		return result
+	}
+	if language == "html" {
+		return multilineAssetSpecifiers("html", addedLineRuns(file))
+	}
+	if language == "css" {
+		return multilineAssetSpecifiers("css", addedLineRuns(file))
 	}
 	for _, line := range lines {
 		result = append(result, lineImportSpecifiers(language, line)...)
+	}
+	return result
+}
+
+func stripJSImportComments(lines []string) []string {
+	result := make([]string, len(lines))
+	inBlock := false
+	quote := byte(0)
+	escaped := false
+	for lineIndex, line := range lines {
+		var cleaned strings.Builder
+		onlyWhitespace := true
+		for index := 0; index < len(line); index++ {
+			char := line[index]
+			if inBlock {
+				if char == '*' && index+1 < len(line) && line[index+1] == '/' {
+					inBlock = false
+					cleaned.WriteString("  ")
+					index++
+				} else {
+					cleaned.WriteByte(' ')
+				}
+				continue
+			}
+			if quote != 0 {
+				cleaned.WriteByte(char)
+				if escaped {
+					escaped = false
+				} else if char == '\\' {
+					escaped = true
+				} else if char == quote {
+					quote = 0
+				}
+				continue
+			}
+			if char == '"' || char == '\'' || char == '`' {
+				quote = char
+				cleaned.WriteByte(char)
+				onlyWhitespace = false
+				continue
+			}
+			if char == '/' && index+1 < len(line) && line[index+1] == '/' {
+				break
+			}
+			if char == '/' && index+1 < len(line) && line[index+1] == '*' {
+				if onlyWhitespace {
+					inBlock = true
+					cleaned.WriteString("  ")
+					index++
+					continue
+				}
+			}
+			cleaned.WriteByte(char)
+			if char != ' ' && char != '\t' {
+				onlyWhitespace = false
+			}
+		}
+		result[lineIndex] = cleaned.String()
+		if quote != '`' {
+			quote = 0
+			escaped = false
+		}
 	}
 	return result
 }
@@ -167,6 +278,8 @@ func lineImportSpecifiers(language, line string) []string {
 		}
 	case "java", "kotlin":
 		return jvmImportSpecifiers(language, line)
+	case "css":
+		return assetSpecifiers(language, line)
 	}
 	return nil
 }
@@ -230,12 +343,17 @@ func javascriptImportSpecifiers(lines []string) []string {
 			braceDepth = 0
 		}
 		if startsStatement {
-			if jsSideEffectImport.MatchString(line) {
+			if match := jsSideEffectImport.FindStringSubmatch(line); match != nil {
+				result = append(result, match[1])
 				continue
 			}
 			collecting = true
 			braceDepth = strings.Count(line, "{") - strings.Count(line, "}")
-			awaitingFromLine = braceDepth == 0 && !jsFromKeyword.MatchString(line)
+			if jsBareImportStart.MatchString(line) {
+				awaitingSpecifier = true
+			} else {
+				awaitingFromLine = braceDepth == 0 && !jsFromKeyword.MatchString(line)
+			}
 		}
 		if !collecting {
 			continue
@@ -307,11 +425,13 @@ func exportedDefinition(language, line string) string {
 
 type pathResolver struct {
 	files             []document.File
+	exactFiles        map[string][]int
 	modules           map[string][]int
 	directories       map[string][]int
 	moduleSuffixes    map[string]suffixEntry
 	directorySuffixes map[string]suffixEntry
 	directoryFiles    map[string][]int
+	platformModules   map[string][]int
 }
 
 type suffixEntry struct {
@@ -321,14 +441,24 @@ type suffixEntry struct {
 
 func newResolver(files []document.File) pathResolver {
 	resolver := pathResolver{
-		files: files, modules: map[string][]int{}, directories: map[string][]int{},
-		directoryFiles: map[string][]int{},
+		files: files, exactFiles: map[string][]int{}, modules: map[string][]int{}, directories: map[string][]int{},
+		directoryFiles: map[string][]int{}, platformModules: map[string][]int{},
 	}
 	for index, file := range files {
 		normalized := normalizePath(file.Path)
 		withoutExtension := strings.TrimSuffix(normalized, path.Ext(normalized))
+		resolver.exactFiles[normalized] = append(resolver.exactFiles[normalized], index)
 		resolver.addModule(normalized, index)
 		resolver.addModule(withoutExtension, index)
+		if languageForPath(file.Path) == "javascript" {
+			if platformModule, ok := stripPlatformInfix(withoutExtension); ok {
+				resolver.platformModules[platformModule] = append(resolver.platformModules[platformModule], index)
+				if path.Base(platformModule) == "index" {
+					directoryModule := path.Dir(platformModule)
+					resolver.platformModules[directoryModule] = append(resolver.platformModules[directoryModule], index)
+				}
+			}
+		}
 		directory := path.Dir(normalized)
 		resolver.directories[directory] = append(resolver.directories[directory], index)
 		for _, suffix := range pathSuffixes(directory) {
@@ -359,6 +489,7 @@ func (r pathResolver) resolve(importer int, language, specifier string) []int {
 		return nil
 	}
 	query := specifier
+	relative := strings.HasPrefix(query, ".")
 	switch language {
 	case "javascript":
 		query, _, _ = strings.Cut(query, "?")
@@ -366,6 +497,10 @@ func (r pathResolver) resolve(importer int, language, specifier string) []int {
 		if strings.HasPrefix(query, ".") {
 			query = path.Join(path.Dir(normalizePath(r.files[importer].Path)), query)
 		}
+	case "html", "css":
+		query, _, _ = strings.Cut(query, "?")
+		query, _, _ = strings.Cut(query, "#")
+		query = path.Join(path.Dir(normalizePath(r.files[importer].Path)), query)
 	case "python":
 		var ok bool
 		query, ok = r.pythonModule(importer, query)
@@ -381,13 +516,16 @@ func (r pathResolver) resolve(importer int, language, specifier string) []int {
 	if query == ".." || strings.HasPrefix(query, "../") {
 		return nil
 	}
+	if language == "html" || language == "css" {
+		return uniqueMatch(r.exactFiles[query])
+	}
 	if language == "go" {
 		return r.resolveDirectory(query, language)
 	}
 	if isJVMLanguage(language) && strings.HasSuffix(query, "/*") {
 		return r.resolveJVMDirectory(strings.TrimSuffix(query, "/*"), language)
 	}
-	return r.resolveModule(query, language)
+	return r.resolveModule(query, language, relative)
 }
 
 func (r pathResolver) pythonModule(importer int, specifier string) (string, bool) {
@@ -413,17 +551,46 @@ func (r pathResolver) pythonModule(importer int, specifier string) (string, bool
 	return path.Join(base, remainder), true
 }
 
-func (r pathResolver) resolveModule(query, language string) []int {
+func (r pathResolver) resolveModule(query, language string, relative bool) []int {
+	explicitExtension := path.Ext(query) != ""
+	if explicitExtension {
+		if matches := uniqueSorted(r.exactFiles[query]); len(matches) > 0 {
+			return uniqueMatch(matches)
+		}
+	}
+	var platformMatches []int
+	if language == "javascript" && !explicitExtension {
+		platformMatches = r.filterLanguage(r.platformModules[query], language)
+	}
 	if matches := uniqueSorted(r.modules[query]); len(matches) > 0 {
-		return r.uniqueLanguageMatch(matches, language)
+		generic := r.uniqueModuleMatch(matches, language, false)
+		if len(platformMatches) > 0 {
+			return uniqueSorted(append(platformMatches, generic...))
+		}
+		return generic
+	}
+	if len(platformMatches) > 0 {
+		return platformMatches
 	}
 	withoutExtension := strings.TrimSuffix(query, path.Ext(query))
 	if withoutExtension != query {
 		if matches := uniqueSorted(r.modules[withoutExtension]); len(matches) > 0 {
-			return r.uniqueLanguageMatch(matches, language)
+			return r.uniqueModuleMatch(matches, language, false)
 		}
 	}
-	return r.uniqueLanguageMatch(resolveUniqueSuffix(r.modules, r.moduleSuffixes, withoutExtension), language)
+	if relative {
+		return nil
+	}
+	if explicitExtension {
+		if matches := resolveUniqueSuffix(r.modules, r.moduleSuffixes, query); len(matches) > 0 {
+			return r.uniqueModuleMatch(matches, language, true)
+		}
+	}
+	return r.uniqueModuleMatch(
+		resolveUniqueSuffix(r.modules, r.moduleSuffixes, withoutExtension),
+		language,
+		false,
+	)
 }
 
 func (r pathResolver) resolveDirectory(query, language string) []int {
@@ -458,10 +625,30 @@ func isJVMLanguage(language string) bool {
 
 func (r pathResolver) uniqueLanguageMatch(indexes []int, language string) []int {
 	matches := r.filterLanguage(indexes, language)
+	return uniqueMatch(matches)
+}
+
+func (r pathResolver) uniqueModuleMatch(indexes []int, language string, anyLanguage bool) []int {
+	if !anyLanguage {
+		return r.uniqueLanguageMatch(indexes, language)
+	}
+	return uniqueMatch(indexes)
+}
+
+func uniqueMatch(matches []int) []int {
 	if len(matches) != 1 {
 		return nil
 	}
 	return matches
+}
+
+func stripPlatformInfix(module string) (string, bool) {
+	for _, infix := range []string{".ios", ".android", ".native", ".web"} {
+		if strings.HasSuffix(module, infix) {
+			return strings.TrimSuffix(module, infix), true
+		}
+	}
+	return "", false
 }
 
 func buildSuffixIndex(index map[string][]int) map[string]suffixEntry {
