@@ -93,8 +93,9 @@ report findings grouped by cohort.
   run, and say so in your report.
 - User config can disable deterministic graph enhancements with
   `[analysis] reading_order = false`, `cohort_dependencies = false`, or
-  `step_order = false`; all three default to true and are user-config
-  only.
+  `step_order = false`, and can disable synthesis-driven staged cohort
+  refinement with `cohort_ops = false`; all four default to true and are
+  user-config only.
 
 ## Providers
 

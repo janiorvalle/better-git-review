@@ -187,7 +187,7 @@ func TestCohortDigestPrioritizesFlaggedFilesWithoutGatingAnalysis(t *testing.T) 
 		{Path: "src/medium.go", Additions: 50},
 	}
 	summaries := []FileSummary{
-		{Summary: "large"}, {Summary: "flagged"}, {Summary: "medium"},
+		{Summary: "large"}, {Summary: "flagged", KeySymbols: []string{"VerifyToken"}}, {Summary: "medium"},
 	}
 	triage := Triage(files, nil, false)
 	cohort := PlannedCohort{
@@ -199,6 +199,9 @@ func TestCohortDigestPrioritizesFlaggedFilesWithoutGatingAnalysis(t *testing.T) 
 	}
 	if len(digest) > DigestMaxChars {
 		t.Fatalf("digest length = %d", len(digest))
+	}
+	if !strings.Contains(digest, `KEY_SYMBOLS="VerifyToken"`) {
+		t.Fatalf("digest omitted batch key symbols:\n%s", digest)
 	}
 	plan := PlanStaged(files, nil, false, DefaultStageBudget)
 	if len(plan.Triage.ReviewWorthy) != 3 {

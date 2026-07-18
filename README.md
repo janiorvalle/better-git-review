@@ -144,6 +144,7 @@ fidelity_budget = 4000000
 reading_order = true
 cohort_dependencies = true
 step_order = true
+cohort_ops = true
 
 [viewer]
 collapse_threshold = 400
