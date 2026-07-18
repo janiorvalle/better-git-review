@@ -45,6 +45,7 @@ type AnalysisConfig struct {
 	ReadingOrder         bool `toml:"reading_order" json:"readingOrder"`
 	CohortDependencies   bool `toml:"cohort_dependencies" json:"cohortDependencies"`
 	StepOrder            bool `toml:"step_order" json:"stepOrder"`
+	CohortOps            bool `toml:"cohort_ops" json:"cohortOps"`
 }
 
 type ViewerConfig struct {
@@ -95,7 +96,7 @@ func Defaults() Config {
 			SummaryBatchMaxFiles: 25, StageConcurrency: 4, DigestMaxFiles: 40,
 			DigestMaxChars: 60_000, FileDiffCap: 12_000, GuardCallThreshold: 5,
 			StagingMaxFiles: 150, FidelityBudget: 4_000_000,
-			ReadingOrder: true, CohortDependencies: true, StepOrder: true,
+			ReadingOrder: true, CohortDependencies: true, StepOrder: true, CohortOps: true,
 		},
 		Viewer: ViewerConfig{
 			CollapseThreshold: 400, FoldThreshold: 10, FoldContext: 3,
