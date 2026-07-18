@@ -208,6 +208,77 @@ func TestStagedHappyPath(t *testing.T) {
 	}
 }
 
+func TestStagedCohortOpsAreDeterministicAndPreserveTheCallSchedule(t *testing.T) {
+	root := t.TempDir()
+	promptLog := filepath.Join(root, "prompts.log")
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	env = setEnv(env, "BGR_MOCK_PROMPT_LOG", promptLog)
+	env = setEnv(env, "BGR_MOCK_COHORT_OPS", `[
+		{"op":"merge","into":0,"from":1},
+		{"op":"retitle","cohort":0,"title":"Combined behavior"}
+	]`)
+	args := []string{
+		"--diff", cohortOpsStagedFixturePath(t), "--provider", "mock",
+		"--no-cache", "--yes", "--format", "json",
+	}
+	firstPath := filepath.Join(root, "first.json")
+	secondPath := filepath.Join(root, "second.json")
+	first := runCLI(t, env, nil, append(args, "--out", firstPath)...)
+	second := runCLI(t, env, nil, append(args, "--out", secondPath)...)
+	if first.err != nil || second.err != nil {
+		t.Fatalf("cohort-op runs failed: first=%v second=%v\n%s\n%s", first.err, second.err, first.stderr, second.stderr)
+	}
+	firstJSON, _ := os.ReadFile(firstPath)
+	secondJSON, _ := os.ReadFile(secondPath)
+	if !bytes.Equal(firstJSON, secondJSON) {
+		t.Fatal("two cohort-op runs produced different analysis JSON")
+	}
+	doc := readAndValidate(t, firstPath)
+	if !doc.Meta.Staged || len(doc.Analysis.Cohorts) != 2 {
+		t.Fatalf("refined staged cohorts = %#v", doc.Analysis.Cohorts)
+	}
+	firstFile := fileIndexByPath(t, doc, "a-one/first.go")
+	secondFile := fileIndexByPath(t, doc, "b-two/second.go")
+	if doc.Analysis.Cohorts[0].Title != "Combined behavior" ||
+		!slices.Equal(doc.Analysis.Cohorts[0].Files, []int{firstFile, secondFile}) {
+		t.Fatalf("merged cohort = %#v", doc.Analysis.Cohorts[0])
+	}
+	logged, err := os.ReadFile(promptLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := bytes.Count(logged, []byte("----- MOCK PROMPT -----")); calls != 14 {
+		t.Fatalf("two staged runs made %d calls, want 14", calls)
+	}
+}
+
+func TestStagedCohortOpsFlagOffMatchesEmptyOpsByteForByte(t *testing.T) {
+	root := t.TempDir()
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	args := []string{
+		"--diff", cohortOpsStagedFixturePath(t), "--provider", "mock",
+		"--no-cache", "--yes", "--format", "json",
+	}
+	emptyPath := filepath.Join(root, "empty.json")
+	empty := runCLI(t, env, nil, append(args, "--out", emptyPath)...)
+	if empty.err != nil {
+		t.Fatalf("empty cohort-op run failed: %v\n%s", empty.err, empty.stderr)
+	}
+
+	disabledEnv := setEnv(env, "BGR_MOCK_COHORT_OPS", `[{"op":"retitle","cohort":0,"title":"Changed"}]`)
+	writeE2EConfig(t, disabledEnv, "[analysis]\ncohort_ops = false\n")
+	disabledPath := filepath.Join(root, "disabled.json")
+	disabled := runCLI(t, disabledEnv, nil, append(args, "--out", disabledPath)...)
+	if disabled.err != nil {
+		t.Fatalf("disabled cohort-op run failed: %v\n%s", disabled.err, disabled.stderr)
+	}
+	emptyJSON, _ := os.ReadFile(emptyPath)
+	disabledJSON, _ := os.ReadFile(disabledPath)
+	if !bytes.Equal(emptyJSON, disabledJSON) {
+		t.Fatal("cohort_ops=false differs from an empty synthesis operation list")
+	}
+}
+
 func TestReadingOrderRendersDefinitionBeforeImporter(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "reading-order.html")
 	result := runCLI(t, isolatedEnvironment(t), nil,
@@ -1056,7 +1127,15 @@ func TestCacheDoesNotCrossChangeGraphSettings(t *testing.T) {
 	if first.err != nil {
 		t.Fatalf("default graph run failed: %v\n%s", first.err, first.stderr)
 	}
-	writeE2EConfig(t, env, "[analysis]\nstep_order = false\n")
+	writeE2EConfig(t, env, "[analysis]\ncohort_ops = false\n")
+	cohortOpsOff := runCLI(t, env, nil, args...)
+	if cohortOpsOff.err != nil {
+		t.Fatalf("cohort_ops=false run failed: %v\n%s", cohortOpsOff.err, cohortOpsOff.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Cached {
+		t.Fatal("cohort_ops=false reused the default analysis cache")
+	}
+	writeE2EConfig(t, env, "[analysis]\ncohort_ops = false\nstep_order = false\n")
 	stepOrderOff := runCLI(t, env, nil, args...)
 	if stepOrderOff.err != nil {
 		t.Fatalf("step_order=false run failed: %v\n%s", stepOrderOff.err, stepOrderOff.stderr)
@@ -1064,7 +1143,7 @@ func TestCacheDoesNotCrossChangeGraphSettings(t *testing.T) {
 	if doc := readAndValidate(t, output); doc.Meta.Cached {
 		t.Fatal("step_order=false reused the default analysis cache")
 	}
-	writeE2EConfig(t, env, "[analysis]\nstep_order = false\nreading_order = false\n")
+	writeE2EConfig(t, env, "[analysis]\ncohort_ops = false\nstep_order = false\nreading_order = false\n")
 	readingOff := runCLI(t, env, nil, args...)
 	if readingOff.err != nil {
 		t.Fatalf("reading_order=false run failed: %v\n%s", readingOff.err, readingOff.stderr)
@@ -1072,7 +1151,7 @@ func TestCacheDoesNotCrossChangeGraphSettings(t *testing.T) {
 	if doc := readAndValidate(t, output); doc.Meta.Cached {
 		t.Fatal("reading_order=false reused the default analysis cache")
 	}
-	writeE2EConfig(t, env, "[analysis]\nstep_order = false\nreading_order = false\ncohort_dependencies = false\n")
+	writeE2EConfig(t, env, "[analysis]\ncohort_ops = false\nstep_order = false\nreading_order = false\ncohort_dependencies = false\n")
 	dependenciesOff := runCLI(t, env, nil, args...)
 	if dependenciesOff.err != nil {
 		t.Fatalf("cohort_dependencies=false run failed: %v\n%s", dependenciesOff.err, dependenciesOff.stderr)
@@ -1759,6 +1838,15 @@ func stagedFixturePath(t *testing.T) string {
 	return path
 }
 
+func cohortOpsStagedFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "cohort-ops-staged.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func readingOrderFixturePath(t *testing.T) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("testdata", "reading-order.patch"))
@@ -1909,7 +1997,7 @@ func isolatedEnvironment(t *testing.T) []string {
 	env := removeEnv(os.Environ(),
 		"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
 		"BGR_STAGE_BUDGET", "BGR_MOCK_FAIL_SUMMARY", "BGR_MOCK_FAIL_NARRATION", "BGR_MOCK_PROMPT_LOG",
-		"BGR_MOCK_REASONING_LOG",
+		"BGR_MOCK_REASONING_LOG", "BGR_MOCK_COHORT_OPS",
 	)
 	env = append(env,
 		"HOME="+root,

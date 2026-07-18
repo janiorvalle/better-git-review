@@ -751,7 +751,7 @@ func analysisSettings(cfg config.Config) analyze.Settings {
 		DigestMaxFiles: value.DigestMaxFiles, DigestMaxChars: value.DigestMaxChars,
 		FileDiffCap: value.FileDiffCap, StagingMaxFiles: value.StagingMaxFiles,
 		ReadingOrder: value.ReadingOrder, CohortDependencies: value.CohortDependencies,
-		StepOrder: value.StepOrder,
+		StepOrder: value.StepOrder, CohortOps: value.CohortOps,
 	}
 }
 

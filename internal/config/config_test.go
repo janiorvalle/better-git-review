@@ -267,6 +267,13 @@ func TestAnalysisFingerprintIncludesAnalysisAndGitOnly(t *testing.T) {
 		stepOrderHash == cohortDependenciesHash {
 		t.Fatal("step_order change did not independently affect fingerprint")
 	}
+	cohortOps := base
+	cohortOps.Analysis.CohortOps = false
+	cohortOpsHash, _ := AnalysisFingerprint(cohortOps)
+	if cohortOpsHash == original || cohortOpsHash == readingOrderHash ||
+		cohortOpsHash == cohortDependenciesHash || cohortOpsHash == stepOrderHash {
+		t.Fatal("cohort_ops change did not independently affect fingerprint")
+	}
 	git := base
 	git.Git.ContextLines = 4
 	changed, _ = AnalysisFingerprint(git)
@@ -285,10 +292,10 @@ func TestAnalysisFingerprintIncludesAnalysisAndGitOnly(t *testing.T) {
 func TestChangeGraphConfigDefaultsAndBooleanValidation(t *testing.T) {
 	defaults := Defaults()
 	if !defaults.Analysis.ReadingOrder || !defaults.Analysis.CohortDependencies ||
-		!defaults.Analysis.StepOrder {
+		!defaults.Analysis.StepOrder || !defaults.Analysis.CohortOps {
 		t.Fatalf("change graph defaults = %#v", defaults.Analysis)
 	}
-	for _, key := range []string{"reading_order", "cohort_dependencies", "step_order"} {
+	for _, key := range []string{"reading_order", "cohort_dependencies", "step_order", "cohort_ops"} {
 		t.Run(key, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.toml")
 			contents := fmt.Sprintf("[analysis]\n%s = \"yes\"\n", key)

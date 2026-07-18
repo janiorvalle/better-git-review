@@ -47,7 +47,21 @@ func (p *Provider) Complete(_ context.Context, prompt string) (string, error) {
 		return "", err
 	}
 	if strings.Contains(prompt, "STAGE: SYNTHESIS") {
-		return `{"title":"[MOCK] Guided review","overview":"Mock staged analysis: deterministic cohorts with bounded narration."}`, nil
+		ops := json.RawMessage(`[]`)
+		if fixture := p.getenv("BGR_MOCK_COHORT_OPS"); fixture != "" {
+			if !json.Valid([]byte(fixture)) || !strings.HasPrefix(strings.TrimSpace(fixture), "[") {
+				return "", fmt.Errorf("BGR_MOCK_COHORT_OPS must be a JSON array")
+			}
+			ops = json.RawMessage(fixture)
+		}
+		return string(mustJSON(struct {
+			Title     string          `json:"title"`
+			Overview  string          `json:"overview"`
+			CohortOps json.RawMessage `json:"cohortOps"`
+		}{
+			Title: "[MOCK] Guided review", Overview: "Mock staged analysis: deterministic cohorts with bounded narration.",
+			CohortOps: ops,
+		})), nil
 	}
 	if strings.Contains(prompt, "STAGE: COHORT_NARRATE") {
 		if failure := p.getenv("BGR_MOCK_FAIL_NARRATION"); failure != "" && strings.Contains(prompt, failure) {

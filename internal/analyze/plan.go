@@ -18,6 +18,7 @@ const (
 	CohortMaxFiles       = 150
 	DigestMaxFiles       = 40
 	DigestMaxChars       = 60_000
+	MaxCohortOps         = 12
 )
 
 type TriageResult struct {
@@ -60,6 +61,7 @@ type Settings struct {
 	ReadingOrder         bool
 	CohortDependencies   bool
 	StepOrder            bool
+	CohortOps            bool
 }
 
 func DefaultSettings() Settings {
@@ -67,8 +69,178 @@ func DefaultSettings() Settings {
 		SummaryBatchMaxFiles: SummaryBatchMaxFiles, StageConcurrency: StageConcurrency,
 		DigestMaxFiles: DigestMaxFiles, DigestMaxChars: DigestMaxChars,
 		FileDiffCap: maxFileDiffCap, StagingMaxFiles: CohortMaxFiles,
-		ReadingOrder: true, CohortDependencies: true, StepOrder: true,
+		ReadingOrder: true, CohortDependencies: true, StepOrder: true, CohortOps: true,
 	}
+}
+
+func ApplyCohortOps(
+	files []document.File,
+	plan StagedPlan,
+	narrations []CohortNarration,
+	stubbedCohorts []int,
+	ops []CohortOp,
+	logf func(string, ...any),
+) (StagedPlan, []CohortNarration, []int) {
+	if !plan.settings.CohortOps || len(ops) == 0 {
+		return plan, narrations, stubbedCohorts
+	}
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	cohorts := make([]PlannedCohort, len(plan.Cohorts))
+	for index, cohort := range plan.Cohorts {
+		cohorts[index] = cohort
+		cohorts[index].Files = append([]int(nil), cohort.Files...)
+	}
+	updatedNarrations := make([]CohortNarration, len(narrations))
+	for index, narration := range narrations {
+		updatedNarrations[index] = narration
+		updatedNarrations[index].ReviewNotes = append([]string(nil), narration.ReviewNotes...)
+	}
+	parent := make([]int, len(cohorts))
+	active := make([]bool, len(cohorts))
+	for index := range cohorts {
+		parent[index] = index
+		active[index] = true
+	}
+	var find func(int) int
+	find = func(index int) int {
+		if parent[index] != index {
+			parent[index] = find(parent[index])
+		}
+		return parent[index]
+	}
+	changed := false
+	for opIndex, operation := range ops {
+		if opIndex >= MaxCohortOps {
+			logf("cohort op %d ignored: operation cap is %d", opIndex+1, MaxCohortOps)
+			continue
+		}
+		if operation.Invalid != "" {
+			logf("cohort op %d ignored: %s", opIndex+1, operation.Invalid)
+			continue
+		}
+		switch operation.Op {
+		case "merge":
+			if operation.Into == nil || operation.From == nil {
+				logf("cohort op %d ignored: merge requires into and from indexes", opIndex+1)
+				continue
+			}
+			into, from := *operation.Into, *operation.From
+			if into < 0 || into >= len(cohorts) || from < 0 || from >= len(cohorts) {
+				logf("cohort op %d ignored: merge index is out of range", opIndex+1)
+				continue
+			}
+			if !active[from] {
+				logf("cohort op %d ignored: from cohort %d was already merged", opIndex+1, from)
+				continue
+			}
+			into = find(into)
+			from = find(from)
+			if into == from {
+				logf("cohort op %d ignored: merge resolves to the same cohort", opIndex+1)
+				continue
+			}
+			cohorts[into].Files = append(cohorts[into].Files, cohorts[from].Files...)
+			updatedNarrations[into].ReviewNotes = dedupeStrings(
+				updatedNarrations[into].ReviewNotes,
+				updatedNarrations[from].ReviewNotes,
+			)
+			parent[from] = into
+			active[from] = false
+			changed = true
+		case "retitle":
+			if operation.Cohort == nil {
+				logf("cohort op %d ignored: retitle requires a cohort index", opIndex+1)
+				continue
+			}
+			cohort := *operation.Cohort
+			if cohort < 0 || cohort >= len(cohorts) {
+				logf("cohort op %d ignored: retitle index is out of range", opIndex+1)
+				continue
+			}
+			if strings.TrimSpace(operation.Title) == "" {
+				logf("cohort op %d ignored: retitle title is empty", opIndex+1)
+				continue
+			}
+			cohort = find(cohort)
+			cohorts[cohort].Title = operation.Title
+			updatedNarrations[cohort].Title = operation.Title
+			changed = true
+		default:
+			logf("cohort op %d ignored: unknown operation %q", opIndex+1, operation.Op)
+		}
+	}
+	if !changed {
+		return plan, narrations, stubbedCohorts
+	}
+
+	stubbed := make(map[int]bool, len(stubbedCohorts))
+	for _, index := range stubbedCohorts {
+		if index >= 0 && index < len(cohorts) {
+			stubbed[find(index)] = true
+		}
+	}
+	var compacted []PlannedCohort
+	var compactedNarrations []CohortNarration
+	var survivorOriginal []int
+	for original := range cohorts {
+		if !active[original] {
+			continue
+		}
+		compacted = append(compacted, cohorts[original])
+		compactedNarrations = append(compactedNarrations, updatedNarrations[original])
+		survivorOriginal = append(survivorOriginal, original)
+	}
+	if plan.settings.ReadingOrder {
+		for index := range compacted {
+			compacted[index].Files = changegraph.StableOrder(compacted[index].Files, plan.edges)
+		}
+	}
+	var dependencies [][]int
+	if plan.settings.StepOrder {
+		cohortFiles := make([][]int, len(compacted))
+		for index, cohort := range compacted {
+			cohortFiles[index] = cohort.Files
+		}
+		order, orderedDependencies := changegraph.StableCohortOrder(cohortFiles, plan.edges)
+		orderedCohorts := make([]PlannedCohort, len(compacted))
+		orderedNarrations := make([]CohortNarration, len(compacted))
+		orderedOriginal := make([]int, len(compacted))
+		for index, original := range order {
+			orderedCohorts[index] = compacted[original]
+			orderedNarrations[index] = compactedNarrations[original]
+			orderedOriginal[index] = survivorOriginal[original]
+		}
+		compacted = orderedCohorts
+		compactedNarrations = orderedNarrations
+		survivorOriginal = orderedOriginal
+		dependencies = orderedDependencies
+	}
+	remappedStubbed := make([]int, 0, len(stubbedCohorts))
+	for index, original := range survivorOriginal {
+		if stubbed[original] {
+			remappedStubbed = append(remappedStubbed, index)
+		}
+	}
+	plan.Cohorts = compacted
+	plan.dependencies = dependencies
+	return plan, compactedNarrations, remappedStubbed
+}
+
+func dedupeStrings(first, second []string) []string {
+	seen := make(map[string]bool, len(first)+len(second))
+	result := make([]string, 0, len(first)+len(second))
+	for _, values := range [][]string{first, second} {
+		for _, value := range values {
+			if seen[value] {
+				continue
+			}
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func PlanStaged(files []document.File, generated map[int]bool, includeMechanical bool, budget int) StagedPlan {
@@ -429,9 +601,10 @@ func BuildCohortDigestWithSettings(
 			break
 		}
 		flags := strings.Join(triage.Flags[index], ", ")
-		line := fmt.Sprintf("- FILE %d PATH=%s (+%d/-%d) FLAGS=%s SUMMARY=%s\n",
+		line := fmt.Sprintf("- FILE %d PATH=%s (+%d/-%d) FLAGS=%s KEY_SYMBOLS=%s SUMMARY=%s\n",
 			index, jsonString(files[index].Path), files[index].Additions, files[index].Deletions,
-			flags, jsonString(summaries[index].Summary))
+			flags, jsonString(strings.Join(summaries[index].KeySymbols, ", ")),
+			jsonString(summaries[index].Summary))
 		if digest.Len()+len(line) > capChars {
 			break
 		}

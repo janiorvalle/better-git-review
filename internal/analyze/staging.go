@@ -58,8 +58,11 @@ func minimumStagedBudgetWithSettings(files []document.File, settings Settings) i
 		Begin: "BEGIN_UNTRUSTED_0000000000000000",
 		End:   "END_UNTRUSTED_0000000000000000",
 	}
-	minimum = max(minimum, synthesisPromptOverheadChars(delimiters))
-	for _, cohort := range PlanCohortsWithMax(files, settings.StagingMaxFiles) {
+	cohorts := PlanCohortsWithMax(files, settings.StagingMaxFiles)
+	synthesisMinimum := synthesisPromptOverheadCharsWithOps(delimiters, settings.CohortOps) +
+		minimumSynthesisCohortChars(cohorts)
+	minimum = max(minimum, synthesisMinimum)
+	for _, cohort := range cohorts {
 		minimum = max(minimum, len(BuildCohortNarrationPrompt(cohort, "", delimiters)))
 	}
 	return minimum

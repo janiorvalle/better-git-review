@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -55,8 +56,70 @@ type CohortNarration struct {
 }
 
 type Synthesis struct {
-	Title    string `json:"title"`
-	Overview string `json:"overview"`
+	Title     string     `json:"title"`
+	Overview  string     `json:"overview"`
+	CohortOps []CohortOp `json:"cohortOps,omitempty"`
+}
+
+type CohortOp struct {
+	Op      string `json:"op"`
+	Into    *int   `json:"into,omitempty"`
+	From    *int   `json:"from,omitempty"`
+	Cohort  *int   `json:"cohort,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Invalid string `json:"-"`
+}
+
+func (operation *CohortOp) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		operation.Invalid = err.Error()
+		return nil
+	}
+	var unknown []string
+	for name := range fields {
+		switch name {
+		case "op", "into", "from", "cohort", "title":
+		default:
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		operation.Invalid = fmt.Sprintf("unknown field %q", unknown[0])
+		return nil
+	}
+	if err := decodeCohortOpField(fields, "op", &operation.Op); err != nil {
+		operation.Invalid = err.Error()
+		return nil
+	}
+	if err := decodeCohortOpField(fields, "into", &operation.Into); err != nil {
+		operation.Invalid = err.Error()
+		return nil
+	}
+	if err := decodeCohortOpField(fields, "from", &operation.From); err != nil {
+		operation.Invalid = err.Error()
+		return nil
+	}
+	if err := decodeCohortOpField(fields, "cohort", &operation.Cohort); err != nil {
+		operation.Invalid = err.Error()
+		return nil
+	}
+	if err := decodeCohortOpField(fields, "title", &operation.Title); err != nil {
+		operation.Invalid = err.Error()
+	}
+	return nil
+}
+
+func decodeCohortOpField(fields map[string]json.RawMessage, name string, target any) error {
+	value, ok := fields[name]
+	if !ok || string(value) == "null" {
+		return nil
+	}
+	if err := json.Unmarshal(value, target); err != nil {
+		return fmt.Errorf("%s has an invalid value", name)
+	}
+	return nil
 }
 
 var BatchSummarySchema = json.RawMessage(`{
@@ -87,6 +150,31 @@ var CohortNarrationSchema = json.RawMessage(`{
 }`)
 
 var SynthesisSchema = json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "overview", "cohortOps"],
+  "properties": {
+    "title": {"type": "string"},
+    "overview": {"type": "string"},
+    "cohortOps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "into", "from", "cohort", "title"],
+        "properties": {
+          "op": {"type": "string"},
+          "into": {"type": ["integer", "null"]},
+          "from": {"type": ["integer", "null"]},
+          "cohort": {"type": ["integer", "null"]},
+          "title": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}`)
+
+var SynthesisSchemaWithoutCohortOps = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
   "required": ["title", "overview"],
@@ -254,11 +342,15 @@ func runStaged(
 	}
 
 	synthesisPrompt := BuildSynthesisPromptWithSettings(opts.Source, plan.Cohorts, narrations, opts.Budget, delimiters, opts.Settings)
+	synthesisSchema := SynthesisSchema
+	if !opts.Settings.CohortOps {
+		synthesisSchema = SynthesisSchemaWithoutCohortOps
+	}
 	synthesis, raw, validationErrors, err := runStageAttempts(
 		ctx,
 		opts.Provider,
 		synthesisPrompt,
-		SynthesisSchema,
+		synthesisSchema,
 		opts.Budget,
 		"cohort synthesis",
 		validateSynthesis,
@@ -267,6 +359,12 @@ func runStaged(
 	if err != nil {
 		return document.Analysis{}, analysisFailure(opts.StateDir, raw, validationErrors, err)
 	}
+	refinedPlan, refinedNarrations, refinedStubbed := ApplyCohortOps(
+		opts.Files, *plan, narrations, stubbedCohorts, synthesis.CohortOps, logf,
+	)
+	plan = &refinedPlan
+	narrations = refinedNarrations
+	stubbedCohorts = refinedStubbed
 
 	analysis := AssembleStagedAnalysis(opts.Files, *plan, summaries, narrations, synthesis)
 	analysis.StubbedCohorts = stubbedCohorts
