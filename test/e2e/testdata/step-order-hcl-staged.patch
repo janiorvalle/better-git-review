@@ -1,0 +1,18 @@
+diff --git a/main.tf b/main.tf
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/main.tf
+@@ -0,0 +1,3 @@
++module "oss_baseline" {
++  source = "./modules/oss-baseline"
++}
+diff --git a/modules/oss-baseline/main.tf b/modules/oss-baseline/main.tf
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/modules/oss-baseline/main.tf
+@@ -0,0 +1,3 @@
++resource "github_repository" "this" {
++  name = "example"
++}

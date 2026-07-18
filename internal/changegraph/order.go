@@ -109,21 +109,7 @@ func CohortDependencies(cohorts [][]int, edges []Edge) [][]int {
 		weights[dependent][dependency]++
 	}
 	for dependent, inbound := range weights {
-		dependencies := make([]int, 0, len(inbound))
-		for dependency := range inbound {
-			dependencies = append(dependencies, dependency)
-		}
-		sort.Slice(dependencies, func(i, j int) bool {
-			left, right := dependencies[i], dependencies[j]
-			if inbound[left] != inbound[right] {
-				return inbound[left] > inbound[right]
-			}
-			return left < right
-		})
-		if len(dependencies) > MaxCohortDependencies {
-			dependencies = dependencies[:MaxCohortDependencies]
-		}
-		result[dependent] = dependencies
+		result[dependent] = rankedDependencies(inbound)
 	}
 	for index := range result {
 		if result[index] == nil {
@@ -131,6 +117,106 @@ func CohortDependencies(cohorts [][]int, edges []Edge) [][]int {
 		}
 	}
 	return result
+}
+
+func StableCohortOrder(cohorts [][]int, edges []Edge) ([]int, [][]int) {
+	current := make([]int, len(cohorts))
+	position := make(map[int]int, len(cohorts))
+	for index := range cohorts {
+		current[index] = index
+		position[index] = index
+	}
+	cohortEdges, weights := aggregateCohortEdges(cohorts, edges)
+	order := StableOrder(current, cohortEdges)
+	orderedPosition := make(map[int]int, len(order))
+	for index, original := range order {
+		orderedPosition[original] = index
+	}
+	component, componentSize := stronglyConnected(current, cohortEdges, position)
+	dependencies := make([][]int, len(cohorts))
+	orderedWeights := make([]map[int]int, len(cohorts))
+	for dependent, inbound := range weights {
+		for dependency, weight := range inbound {
+			if component[dependent] == component[dependency] && componentSize[component[dependent]] > 1 {
+				continue
+			}
+			orderedDependent := orderedPosition[dependent]
+			orderedDependency := orderedPosition[dependency]
+			if orderedDependency >= orderedDependent {
+				panic("changegraph: cohort dependency violates topological order")
+			}
+			if orderedWeights[orderedDependent] == nil {
+				orderedWeights[orderedDependent] = map[int]int{}
+			}
+			orderedWeights[orderedDependent][orderedDependency] = weight
+		}
+	}
+	for dependent, inbound := range orderedWeights {
+		dependencies[dependent] = rankedDependencies(inbound)
+	}
+	for index := range dependencies {
+		if dependencies[index] == nil {
+			dependencies[index] = []int{}
+		}
+	}
+	return order, dependencies
+}
+
+func aggregateCohortEdges(cohorts [][]int, edges []Edge) ([]Edge, []map[int]int) {
+	fileCohort := map[int]int{}
+	for cohortIndex, files := range cohorts {
+		for _, file := range files {
+			fileCohort[file] = cohortIndex
+		}
+	}
+	weights := make([]map[int]int, len(cohorts))
+	seenEdges := map[Edge]bool{}
+	for _, edge := range edges {
+		if seenEdges[edge] {
+			continue
+		}
+		seenEdges[edge] = true
+		dependent, dependentOK := fileCohort[edge.Importer]
+		dependency, dependencyOK := fileCohort[edge.Imported]
+		if !dependentOK || !dependencyOK || dependent == dependency {
+			continue
+		}
+		if weights[dependent] == nil {
+			weights[dependent] = map[int]int{}
+		}
+		weights[dependent][dependency]++
+	}
+	var result []Edge
+	for dependent, inbound := range weights {
+		for dependency := range inbound {
+			result = append(result, Edge{Importer: dependent, Imported: dependency})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Importer != result[j].Importer {
+			return result[i].Importer < result[j].Importer
+		}
+		return result[i].Imported < result[j].Imported
+	})
+	return result, weights
+}
+
+func rankedDependencies(inbound map[int]int) []int {
+	dependencies := make([]int, 0, len(inbound))
+	for dependency := range inbound {
+		dependencies = append(dependencies, dependency)
+	}
+	sort.Slice(dependencies, func(i, j int) bool {
+		left, right := dependencies[i], dependencies[j]
+		if inbound[left] != inbound[right] {
+			return inbound[left] > inbound[right]
+		}
+		return left < right
+	})
+	if len(dependencies) > MaxCohortDependencies {
+		dependencies = dependencies[:MaxCohortDependencies]
+	}
+	return dependencies
 }
 
 func stronglyConnected(nodes []int, edges []Edge, position map[int]int) (map[int]int, map[int]int) {

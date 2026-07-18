@@ -38,6 +38,49 @@ func TestBuildResolvesModernTypeScriptModuleExtensions(t *testing.T) {
 	}
 }
 
+func TestBuildResolvesTypeScriptPathAlias(t *testing.T) {
+	files := []document.File{
+		testFile("src/components/Button.tsx", `export default () => null`),
+		testFile("src/screens/Home.tsx", `import Button from "@app/components/Button"`),
+		testFile("src/screens/Settings.tsx", `import Button from "~app/components/Button"`),
+	}
+	want := []Edge{{Importer: 1, Imported: 0}, {Importer: 2, Imported: 0}}
+	if got := Build(files); !slices.Equal(got, want) {
+		t.Fatalf("edges = %#v, want aliased import %#v", got, want)
+	}
+}
+
+func TestBuildPathAliasRejectsPackagesAmbiguityAndUnsupportedExtensions(t *testing.T) {
+	t.Run("packages", func(t *testing.T) {
+		files := []document.File{
+			testFile("src/react.ts", `export default {}`),
+			testFile("src/app.ts", `import React from "react"`, `import get from "lodash/get"`),
+		}
+		if got := Build(files); len(got) != 0 {
+			t.Fatalf("package imports produced edges: %#v", got)
+		}
+	})
+	t.Run("ambiguous", func(t *testing.T) {
+		files := []document.File{
+			testFile("src/components/Button.tsx", `export default () => null`),
+			testFile("legacy/components/Button.tsx", `export default () => null`),
+			testFile("src/Home.tsx", `import Button from "@app/components/Button"`),
+		}
+		if got := Build(files); len(got) != 0 {
+			t.Fatalf("ambiguous alias produced edges: %#v", got)
+		}
+	})
+	t.Run("unsupported importer extension", func(t *testing.T) {
+		files := []document.File{
+			testFile("src/components/Button.mts", `export default () => null`),
+			testFile("src/Home.mts", `import Button from "@app/components/Button"`),
+		}
+		if got := Build(files); len(got) != 0 {
+			t.Fatalf("MTS alias produced edges: %#v", got)
+		}
+	})
+}
+
 func TestBuildDropsAmbiguousExactModuleAlias(t *testing.T) {
 	files := []document.File{
 		testFile("src/lib.ts", `export const abc = 1`),
@@ -928,6 +971,49 @@ func TestCohortDependenciesKeepsTopThreeEarlierInbound(t *testing.T) {
 	for index := 0; index < 4; index++ {
 		if len(got[index]) != 0 {
 			t.Fatalf("cohort %d dependencies = %#v", index, got[index])
+		}
+	}
+}
+
+func TestStableCohortOrderMovesDependenciesFirstAndKeepsNoEdgeOrder(t *testing.T) {
+	cohorts := [][]int{{0}, {10}, {20}, {30}}
+	order, dependencies := StableCohortOrder(cohorts, []Edge{{Importer: 0, Imported: 10}})
+	if !slices.Equal(order, []int{1, 0, 2, 3}) {
+		t.Fatalf("cohort order = %#v", order)
+	}
+	if !slices.Equal(dependencies[1], []int{0}) {
+		t.Fatalf("ordered dependencies = %#v", dependencies)
+	}
+	if order[2] != 2 || order[3] != 3 {
+		t.Fatalf("edge-free cohorts changed relative order: %#v", order)
+	}
+}
+
+func TestStableCohortOrderDropsCycleEdgesAndKeepsMemberOrder(t *testing.T) {
+	cohorts := [][]int{{0}, {10}, {20}}
+	edges := []Edge{
+		{Importer: 0, Imported: 10},
+		{Importer: 10, Imported: 0},
+		{Importer: 0, Imported: 20},
+	}
+	order, dependencies := StableCohortOrder(cohorts, edges)
+	if !slices.Equal(order, []int{2, 0, 1}) {
+		t.Fatalf("cycle member order changed: %#v", order)
+	}
+	if !slices.Equal(dependencies[1], []int{0}) || len(dependencies[2]) != 0 {
+		t.Fatalf("cycle edges were not dropped: %#v", dependencies)
+	}
+}
+
+func TestStableCohortOrderIsNoOpWithoutEdges(t *testing.T) {
+	cohorts := [][]int{{4}, {2}, {9}}
+	order, dependencies := StableCohortOrder(cohorts, nil)
+	if !slices.Equal(order, []int{0, 1, 2}) {
+		t.Fatalf("edge-free cohort order changed: %#v", order)
+	}
+	for index, inbound := range dependencies {
+		if len(inbound) != 0 {
+			t.Fatalf("edge-free cohort %d dependencies = %#v", index, inbound)
 		}
 	}
 }

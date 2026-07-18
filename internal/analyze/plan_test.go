@@ -154,6 +154,32 @@ func TestPlanStagedOrdersDefinitionBeforeImporter(t *testing.T) {
 	}
 }
 
+func TestPlanStagedOrdersDependencyCohortBeforeImporter(t *testing.T) {
+	files := []document.File{
+		graphTestFile("main.tf", `module "oss_baseline" { source = "./modules/oss-baseline" }`),
+		graphTestFile("modules/oss-baseline/main.tf", `resource "github_repository" "this" {}`),
+	}
+	plan := PlanStaged(files, nil, false, DefaultStageBudget)
+	if len(plan.Cohorts) != 2 || !slices.Equal(plan.Cohorts[0].Files, []int{1}) ||
+		!slices.Equal(plan.Cohorts[1].Files, []int{0}) {
+		t.Fatalf("ordered cohorts = %#v", plan.Cohorts)
+	}
+	if !slices.Equal(plan.dependencies[1], []int{0}) {
+		t.Fatalf("ordered dependencies = %#v", plan.dependencies)
+	}
+
+	settings := DefaultSettings()
+	settings.StepOrder = false
+	disabled := PlanStagedWithSettings(files, nil, false, DefaultStageBudget, settings)
+	if !slices.Equal(disabled.Cohorts[0].Files, []int{0}) ||
+		!slices.Equal(disabled.Cohorts[1].Files, []int{1}) {
+		t.Fatalf("step_order=false cohort order = %#v", disabled.Cohorts)
+	}
+	if disabled.Calls != plan.Calls {
+		t.Fatalf("step ordering changed call count: on=%d off=%d", plan.Calls, disabled.Calls)
+	}
+}
+
 func TestCohortDigestPrioritizesFlaggedFilesWithoutGatingAnalysis(t *testing.T) {
 	files := []document.File{
 		{Path: "src/large.go", Additions: 100},
@@ -280,10 +306,6 @@ func TestAssembleStagedAnalysisPopulatesCappedEarlierDependencies(t *testing.T) 
 
 func TestDefaultGraphSettingsLeaveEdgeFreeStagedJSONUnchanged(t *testing.T) {
 	files := []document.File{{Path: "src/a.go"}, {Path: "src/b.go"}}
-	settingsOff := DefaultSettings()
-	settingsOff.ReadingOrder = false
-	settingsOff.CohortDependencies = false
-	offPlan := PlanStagedWithSettings(files, nil, false, DefaultStageBudget, settingsOff)
 	onPlan := PlanStaged(files, nil, false, DefaultStageBudget)
 	summaries := []FileSummary{
 		{Summary: "a", KeySymbols: []string{}},
@@ -293,10 +315,27 @@ func TestDefaultGraphSettingsLeaveEdgeFreeStagedJSONUnchanged(t *testing.T) {
 		Title: "Changes", Intent: "Review.", Narrative: "Review changes.", ReviewNotes: []string{},
 	}}
 	synthesis := Synthesis{Title: "Change", Overview: "Overview"}
-	offJSON, _ := json.Marshal(AssembleStagedAnalysis(files, offPlan, summaries, narrations, synthesis))
 	onJSON, _ := json.Marshal(AssembleStagedAnalysis(files, onPlan, summaries, narrations, synthesis))
-	if string(onJSON) != string(offJSON) {
-		t.Fatalf("edge-free output changed:\noff: %s\n on: %s", offJSON, onJSON)
+	stepOrderOff := DefaultSettings()
+	stepOrderOff.StepOrder = false
+	allGraphSettingsOff := stepOrderOff
+	allGraphSettingsOff.ReadingOrder = false
+	allGraphSettingsOff.CohortDependencies = false
+	tests := []struct {
+		name     string
+		settings Settings
+	}{
+		{name: "step order off", settings: stepOrderOff},
+		{name: "all graph settings off", settings: allGraphSettingsOff},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			offPlan := PlanStagedWithSettings(files, nil, false, DefaultStageBudget, test.settings)
+			offJSON, _ := json.Marshal(AssembleStagedAnalysis(files, offPlan, summaries, narrations, synthesis))
+			if string(onJSON) != string(offJSON) {
+				t.Fatalf("edge-free output changed:\noff: %s\n on: %s", offJSON, onJSON)
+			}
+		})
 	}
 }
 

@@ -300,7 +300,6 @@ func TestChangeGraphAnalysisIsByteDeterministic(t *testing.T) {
 func TestDefaultGraphSettingsLeaveEdgeFreeOutputByteIdentical(t *testing.T) {
 	env := isolatedEnvironment(t)
 	defaultPath := filepath.Join(t.TempDir(), "default.json")
-	disabledPath := filepath.Join(t.TempDir(), "disabled.json")
 	args := []string{
 		"--diff", fixturePath(t), "--provider", "mock", "--no-cache", "--format", "json",
 	}
@@ -308,15 +307,28 @@ func TestDefaultGraphSettingsLeaveEdgeFreeOutputByteIdentical(t *testing.T) {
 	if defaultRun.err != nil {
 		t.Fatalf("default graph run failed: %v\n%s", defaultRun.err, defaultRun.stderr)
 	}
-	writeE2EConfig(t, env, "[analysis]\nreading_order = false\ncohort_dependencies = false\n")
-	disabledRun := runCLI(t, env, nil, append(args, "--out", disabledPath)...)
-	if disabledRun.err != nil {
-		t.Fatalf("disabled graph run failed: %v\n%s", disabledRun.err, disabledRun.stderr)
-	}
 	defaultJSON, _ := os.ReadFile(defaultPath)
-	disabledJSON, _ := os.ReadFile(disabledPath)
-	if !bytes.Equal(defaultJSON, disabledJSON) {
-		t.Fatal("default-on graph settings changed an edge-free analysis")
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{name: "step order off", config: "[analysis]\nstep_order = false\n"},
+		{name: "all graph settings off", config: "[analysis]\nreading_order = false\ncohort_dependencies = false\nstep_order = false\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			disabledEnv := isolatedEnvironment(t)
+			writeE2EConfig(t, disabledEnv, test.config)
+			disabledPath := filepath.Join(t.TempDir(), "disabled.json")
+			disabledRun := runCLI(t, disabledEnv, nil, append(args, "--out", disabledPath)...)
+			if disabledRun.err != nil {
+				t.Fatalf("disabled graph run failed: %v\n%s", disabledRun.err, disabledRun.stderr)
+			}
+			disabledJSON, _ := os.ReadFile(disabledPath)
+			if !bytes.Equal(defaultJSON, disabledJSON) {
+				t.Fatal("default-on graph settings changed an edge-free analysis")
+			}
+		})
 	}
 }
 
@@ -443,6 +455,67 @@ func TestStagedHCLChangeGraphPopulatesDependenciesAndOrdersDefinitions(t *testin
 	definition := fileIndexByPath(t, doc, "c-app/z-definitions.tf")
 	consumer := fileIndexByPath(t, doc, "c-app/a-consumer.tf")
 	assertFilesOrderedInOneCohort(t, doc, []int{definition}, consumer)
+}
+
+func TestStagedHCLStepOrderMovesModuleBeforeRootAndRestoresDependency(t *testing.T) {
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	output := filepath.Join(t.TempDir(), "step-order.html")
+	result := runCLI(t, env, nil,
+		"--diff", stepOrderHCLStagedFixturePath(t), "--provider", "mock",
+		"--no-cache", "--yes", "--out", output)
+	if result.err != nil {
+		t.Fatalf("staged step-order command failed: %v\n%s", result.err, result.stderr)
+	}
+	html, doc := readHTMLDocument(t, output)
+	root := fileIndexByPath(t, doc, "main.tf")
+	module := fileIndexByPath(t, doc, "modules/oss-baseline/main.tf")
+	rootCohort, moduleCohort := -1, -1
+	for cohortIndex, cohort := range doc.Analysis.Cohorts {
+		if slices.Contains(cohort.Files, root) {
+			rootCohort = cohortIndex
+		}
+		if slices.Contains(cohort.Files, module) {
+			moduleCohort = cohortIndex
+		}
+	}
+	if moduleCohort < 0 || rootCohort < 0 || moduleCohort >= rootCohort {
+		t.Fatalf("module/root cohort order = module %d, root %d", moduleCohort, rootCohort)
+	}
+	if !slices.Equal(doc.Analysis.Cohorts[rootCohort].DependsOn, []int{moduleCohort}) {
+		t.Fatalf("root dependencies = %#v", doc.Analysis.Cohorts[rootCohort].DependsOn)
+	}
+	if !strings.Contains(html, `class="dg-edge"`) {
+		t.Fatal("step-ordered diagram has no dependency arrow")
+	}
+
+	disabledEnv := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	writeE2EConfig(t, disabledEnv, "[analysis]\nstep_order = false\n")
+	disabledOutput := filepath.Join(t.TempDir(), "step-order-disabled.html")
+	disabledRun := runCLI(t, disabledEnv, nil,
+		"--diff", stepOrderHCLStagedFixturePath(t), "--provider", "mock",
+		"--no-cache", "--yes", "--out", disabledOutput)
+	if disabledRun.err != nil {
+		t.Fatalf("step_order=false command failed: %v\n%s", disabledRun.err, disabledRun.stderr)
+	}
+	_, disabled := readHTMLDocument(t, disabledOutput)
+	disabledRoot := fileIndexByPath(t, disabled, "main.tf")
+	disabledModule := fileIndexByPath(t, disabled, "modules/oss-baseline/main.tf")
+	rootCohort, moduleCohort = -1, -1
+	for cohortIndex, cohort := range disabled.Analysis.Cohorts {
+		if slices.Contains(cohort.Files, disabledRoot) {
+			rootCohort = cohortIndex
+		}
+		if slices.Contains(cohort.Files, disabledModule) {
+			moduleCohort = cohortIndex
+		}
+	}
+	if rootCohort < 0 || moduleCohort < 0 || rootCohort >= moduleCohort {
+		t.Fatalf("step_order=false changed v1.3 cohort order: root %d, module %d", rootCohort, moduleCohort)
+	}
+	if len(disabled.Analysis.Cohorts[rootCohort].DependsOn) != 0 {
+		t.Fatalf("step_order=false restored forward dependency: %#v",
+			disabled.Analysis.Cohorts[rootCohort].DependsOn)
+	}
 }
 
 func TestAssetChangeGraphOrdersCSSAndPlatformVariantsBeforeImporter(t *testing.T) {
@@ -983,7 +1056,15 @@ func TestCacheDoesNotCrossChangeGraphSettings(t *testing.T) {
 	if first.err != nil {
 		t.Fatalf("default graph run failed: %v\n%s", first.err, first.stderr)
 	}
-	writeE2EConfig(t, env, "[analysis]\nreading_order = false\n")
+	writeE2EConfig(t, env, "[analysis]\nstep_order = false\n")
+	stepOrderOff := runCLI(t, env, nil, args...)
+	if stepOrderOff.err != nil {
+		t.Fatalf("step_order=false run failed: %v\n%s", stepOrderOff.err, stepOrderOff.stderr)
+	}
+	if doc := readAndValidate(t, output); doc.Meta.Cached {
+		t.Fatal("step_order=false reused the default analysis cache")
+	}
+	writeE2EConfig(t, env, "[analysis]\nstep_order = false\nreading_order = false\n")
 	readingOff := runCLI(t, env, nil, args...)
 	if readingOff.err != nil {
 		t.Fatalf("reading_order=false run failed: %v\n%s", readingOff.err, readingOff.stderr)
@@ -991,7 +1072,7 @@ func TestCacheDoesNotCrossChangeGraphSettings(t *testing.T) {
 	if doc := readAndValidate(t, output); doc.Meta.Cached {
 		t.Fatal("reading_order=false reused the default analysis cache")
 	}
-	writeE2EConfig(t, env, "[analysis]\nreading_order = false\ncohort_dependencies = false\n")
+	writeE2EConfig(t, env, "[analysis]\nstep_order = false\nreading_order = false\ncohort_dependencies = false\n")
 	dependenciesOff := runCLI(t, env, nil, args...)
 	if dependenciesOff.err != nil {
 		t.Fatalf("cohort_dependencies=false run failed: %v\n%s", dependenciesOff.err, dependenciesOff.stderr)
@@ -1708,6 +1789,15 @@ func changeGraphJVMStagedFixturePath(t *testing.T) string {
 func changeGraphHCLStagedFixturePath(t *testing.T) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("testdata", "changegraph-hcl-staged.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func stepOrderHCLStagedFixturePath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", "step-order-hcl-staged.patch"))
 	if err != nil {
 		t.Fatal(err)
 	}
