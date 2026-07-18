@@ -152,6 +152,96 @@ func TestBuildAllowsPythonRelativeImportToRepositoryRoot(t *testing.T) {
 	}
 }
 
+func TestBuildResolvesJavaAndKotlinImports(t *testing.T) {
+	files := []document.File{
+		testFile("src/main/java/com/acme/model/Money.java", `package com.acme.model;`),
+		testFile("src/main/java/com/acme/service/MoneyService.java", `import com.acme.model.Money;`),
+		testFile("src/main/java/com/acme/util/Amounts.java", `package com.acme.util;`),
+		testFile("src/main/java/com/acme/app/Application.java", `import static com.acme.util.Amounts.round;`),
+		testFile("src/main/kotlin/com/acme/view/Labels.kt", `package com.acme.view`),
+		testFile("src/main/kotlin/com/acme/view/Page.kts", `import com.acme.view.Labels as ViewLabels`),
+	}
+	want := []Edge{
+		{Importer: 1, Imported: 0},
+		{Importer: 3, Imported: 2},
+		{Importer: 5, Imported: 4},
+	}
+	if got := Build(files); !slices.Equal(got, want) {
+		t.Fatalf("edges = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildResolvesJVMWildcardImportsToEveryChangedPackageFile(t *testing.T) {
+	files := []document.File{
+		testFile("src/main/java/com/acme/parts/Alpha.java", `package com.acme.parts;`),
+		testFile("src/main/kotlin/com/acme/parts/Beta.kt", `package com.acme.parts`),
+		testFile("src/main/java/com/acme/app/Application.java", `import com.acme.parts.*;`),
+	}
+	want := []Edge{{Importer: 2, Imported: 0}, {Importer: 2, Imported: 1}}
+	if got := Build(files); !slices.Equal(got, want) {
+		t.Fatalf("edges = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildResolvesJavaStaticWildcardToOwningClass(t *testing.T) {
+	files := []document.File{
+		testFile("src/main/java/com/acme/util/Amounts.java", `package com.acme.util;`),
+		testFile("src/main/java/com/acme/app/Application.java", `import static com.acme.util.Amounts.*;`),
+	}
+	want := []Edge{{Importer: 1, Imported: 0}}
+	if got := Build(files); !slices.Equal(got, want) {
+		t.Fatalf("edges = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildFindsJVMDefinitionsAndSamePackageReferences(t *testing.T) {
+	files := []document.File{
+		testFile("java/ZHelper.java", `public final class JavaHelper {}`),
+		testFile("java/AConsumer.java", `JavaHelper helper;`),
+		testFile("kotlin/Definitions.kt", `fun calculateTotal() = 1`),
+		testFile("kotlin/Consumer.kt", `val total = calculateTotal()`),
+	}
+	want := []Edge{{Importer: 1, Imported: 0}, {Importer: 3, Imported: 2}}
+	if got := Build(files); !slices.Equal(got, want) {
+		t.Fatalf("edges = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildJVMRequiresOneDefiningFileAndFourCharacterName(t *testing.T) {
+	files := []document.File{
+		testFile("one/Shared.java", `public class SharedName {}`, `class Foo {}`),
+		testFile("two/Shared.kt", `class SharedName`),
+		testFile("consumer/Use.java", `SharedName value;`, `Foo shortName;`),
+		testFile("unique/Only.kt", `object UniqueObject`),
+		testFile("consumer/Unique.java", `UniqueObject value;`),
+	}
+	want := []Edge{{Importer: 4, Imported: 3}}
+	if got := Build(files); !slices.Equal(got, want) {
+		t.Fatalf("edges = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildDoesNotMisreadUnsupportedKotlinFunctionForms(t *testing.T) {
+	files := []document.File{
+		testFile("kotlin/Extensions.kt", `fun Order.calculateTotal() = 1`, `fun <T> genericTotal() = 1`),
+		testFile("kotlin/Consumer.kt", `val order = Order()`, `val total = calculateTotal()`, `genericTotal<String>()`),
+	}
+	if got := Build(files); len(got) != 0 {
+		t.Fatalf("unsupported Kotlin function form produced edges: %#v", got)
+	}
+}
+
+func TestBuildSupportsTrailingDollarJavaIdentifier(t *testing.T) {
+	files := []document.File{
+		testFile("java/Money.java", `public class Money$ {}`),
+		testFile("java/Consumer.java", `Money$ amount;`),
+	}
+	want := []Edge{{Importer: 1, Imported: 0}}
+	if got := Build(files); !slices.Equal(got, want) {
+		t.Fatalf("edges = %#v, want %#v", got, want)
+	}
+}
+
 func TestBuildFindsLanguageSpecificExportedDefinitions(t *testing.T) {
 	files := []document.File{
 		testFile("go/definition.go", `func GoHelper() {}`),

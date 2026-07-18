@@ -222,6 +222,10 @@ The HTML always carries the complete diffs either way.
 An added-line change graph puts changed definitions before their importers
 within each review step. On staged runs, the same graph adds up to three
 earlier-step dependencies so the overview diagram shows how the work builds.
+Import and definition edges cover JavaScript/TypeScript, Go, Python, Java,
+and Kotlin; C# is excluded because namespaces do not reliably map to paths,
+Swift module imports do not identify files, and C/C++, Rust, Ruby, and PHP
+remain deferred until a real walkthrough demands them.
 
 On Git 2.40 and newer, generated-file detection reads `.gitattributes` from
 the reviewed commit; older Git falls back to the worktree's attributes. If
