@@ -51,6 +51,9 @@ structure instead of a flat wall of files.
 - `analysis.mechanicalFiles[]` — exact renames, repository-attested
   generated files, and binaries deliberately skipped by the model. These
   are neutral provenance, not analysis failures.
+- Generated-file detection reads `.gitattributes` from the reviewed commit
+  on Git 2.40 and newer, falls back to worktree attributes on older Git, and
+  keeps files review-worthy if both checks fail.
 - `meta.staged` — true when the diff was too large for one pass and was
   triaged, summarized in bounded batches, and grouped deterministically.
 

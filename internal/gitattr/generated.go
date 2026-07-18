@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/janiorvalle/better-git-review/internal/document"
-	"github.com/janiorvalle/better-git-review/internal/provider"
 )
 
 type Runner interface {
@@ -20,8 +20,12 @@ type ExecRunner struct{}
 func (ExecRunner) Check(ctx context.Context, repoDir, ref string, paths []string) ([]byte, error) {
 	args := []string{
 		"-c", "color.ui=false",
-		"check-attr", "-z", "--source=" + ref, "--stdin", "linguist-generated",
+		"check-attr", "-z",
 	}
+	if ref != "" {
+		args = append(args, "--source="+ref)
+	}
+	args = append(args, "--stdin", "linguist-generated")
 	command := exec.CommandContext(ctx, "git", args...)
 	command.Dir = repoDir
 	var input, stdout, stderr bytes.Buffer
@@ -37,9 +41,31 @@ func (ExecRunner) Check(ctx context.Context, repoDir, ref string, paths []string
 		if detail == "" {
 			detail = err.Error()
 		}
-		return nil, fmt.Errorf("%s", provider.SafeDiagnostic(detail, 1_000))
+		return nil, fmt.Errorf("%s", firstLineDiagnostic(detail))
 	}
 	return stdout.Bytes(), nil
+}
+
+func firstLineDiagnostic(detail string) string {
+	detail = strings.TrimSpace(detail)
+	line, _, _ := strings.Cut(detail, "\n")
+	line = strings.TrimSuffix(line, "\r")
+	diagnostic := strconv.QuoteToASCII(line)
+	if len(diagnostic) <= 200 {
+		return diagnostic
+	}
+	const suffix = "... [truncated]"
+	var escaped strings.Builder
+	budget := 200 - len(suffix) - 2
+	for _, value := range line {
+		quoted := strconv.QuoteToASCII(string(value))
+		encoded := quoted[1 : len(quoted)-1]
+		if escaped.Len()+len(encoded) > budget {
+			break
+		}
+		escaped.WriteString(encoded)
+	}
+	return `"` + escaped.String() + suffix + `"`
 }
 
 func Generated(
@@ -65,9 +91,15 @@ func Generated(
 	output, err := runner.Check(ctx, repoDir, ref, paths)
 	if err != nil {
 		if logf != nil {
-			logf("could not read linguist-generated attributes; keeping files review-worthy: %v", err)
+			logf("could not read attributes from the reviewed commit; using worktree attributes")
 		}
-		return result
+		output, err = runner.Check(ctx, repoDir, "", paths)
+		if err != nil {
+			if logf != nil {
+				logf("could not read linguist-generated attributes; keeping files review-worthy: %v", err)
+			}
+			return result
+		}
 	}
 	fields := bytes.Split(output, []byte{0})
 	for offset := 0; offset+2 < len(fields); offset += 3 {

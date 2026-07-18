@@ -217,6 +217,10 @@ narration, and one final call synthesizes the overview. `--include-mechanical`
 or `include_mechanical = true` opts every file back into model analysis.
 The HTML always carries the complete diffs either way.
 
+On Git 2.40 and newer, generated-file detection reads `.gitattributes` from
+the reviewed commit; older Git falls back to the worktree's attributes. If
+both checks fail, the files stay review-worthy.
+
 Any plan over five calls tells you the exact planned count — the same
 immutable batch/cohort plan the executor uses — and asks first. A failed
 summary batch retries once, then every file in that batch is visibly
