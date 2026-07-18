@@ -1,0 +1,76 @@
+diff --git a/a-model/src/main/java/com/acme/model/Money.java b/a-model/src/main/java/com/acme/model/Money.java
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/a-model/src/main/java/com/acme/model/Money.java
+@@ -0,0 +1,5 @@
++package com.acme.model;
++
++public record Money(int cents) {
++}
+diff --git a/b-service/src/main/java/com/acme/service/MoneyService.java b/b-service/src/main/java/com/acme/service/MoneyService.java
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/b-service/src/main/java/com/acme/service/MoneyService.java
+@@ -0,0 +1,9 @@
++package com.acme.service;
++
++import com.acme.model.Money;
++
++public final class MoneyService {
++    public Money total() {
++        return new Money(100);
++    }
++}
+diff --git a/c-api/src/main/java/com/acme/api/MoneyController.java b/c-api/src/main/java/com/acme/api/MoneyController.java
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/c-api/src/main/java/com/acme/api/MoneyController.java
+@@ -0,0 +1,9 @@
++package com.acme.api;
++
++import com.acme.service.*;
++
++public final class MoneyController {
++    public static MoneyService create() {
++        return new MoneyService();
++    }
++}
+diff --git a/d-app/src/main/java/com/acme/app/Application.java b/d-app/src/main/java/com/acme/app/Application.java
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/d-app/src/main/java/com/acme/app/Application.java
+@@ -0,0 +1,9 @@
++package com.acme.app;
++
++import static com.acme.api.MoneyController.create;
++
++public final class Application {
++    public static void main(String[] args) {
++        create().total();
++    }
++}
+diff --git a/e-order/src/main/java/com/acme/order/AConsumer.java b/e-order/src/main/java/com/acme/order/AConsumer.java
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/e-order/src/main/java/com/acme/order/AConsumer.java
+@@ -0,0 +1,5 @@
++package com.acme.order;
++
++public final class AConsumer {
++    private final ZHelper helper = new ZHelper();
++}
+diff --git a/e-order/src/main/java/com/acme/order/ZHelper.java b/e-order/src/main/java/com/acme/order/ZHelper.java
+new file mode 100644
+index 0000000..6666666
+--- /dev/null
++++ b/e-order/src/main/java/com/acme/order/ZHelper.java
+@@ -0,0 +1,4 @@
++package com.acme.order;
++
++public final class ZHelper {
++}

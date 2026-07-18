@@ -28,11 +28,16 @@ var (
 	pythonFromPattern   = regexp.MustCompile(`^\s*from\s+([.A-Za-z_][.A-Za-z0-9_]*)\s+import\s+`)
 	pythonImportPattern = regexp.MustCompile(`^\s*import\s+([^#]+)`)
 	pythonModulePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
+	javaImportPattern   = regexp.MustCompile(`^\s*import\s+(?:(static)\s+)?([A-Za-z_$][A-Za-z0-9_$]*(?:\.(?:[A-Za-z_$][A-Za-z0-9_$]*|\*))*)\s*;\s*(?://.*)?$`)
+	kotlinImportPattern = regexp.MustCompile(`^\s*import\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\.(?:[A-Za-z_$][A-Za-z0-9_$]*|\*))*)\s*(?:as\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*;?\s*(?://.*)?$`)
 
-	jsDefinitionPattern     = regexp.MustCompile(`^\s*export\s+(?:async\s+)?(?:function|const|class|type|interface)\s+([A-Za-z_$][A-Za-z0-9_$]*)`)
-	goDefinitionPattern     = regexp.MustCompile(`^\s*(?:func|type)\s+([A-Z][A-Za-z0-9_]*)\b`)
-	pythonDefinitionPattern = regexp.MustCompile(`^(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
-	identifierPattern       = regexp.MustCompile(`[A-Za-z_$][A-Za-z0-9_$]*`)
+	jsDefinitionPattern             = regexp.MustCompile(`^\s*export\s+(?:async\s+)?(?:function|const|class|type|interface)\s+([A-Za-z_$][A-Za-z0-9_$]*)`)
+	goDefinitionPattern             = regexp.MustCompile(`^\s*(?:func|type)\s+([A-Z][A-Za-z0-9_]*)\b`)
+	pythonDefinitionPattern         = regexp.MustCompile(`^(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
+	javaDefinitionPattern           = regexp.MustCompile(`^\s*(?:public\s+)?(?:(?:final|abstract|sealed)\s+)*(?:class|interface|enum|record)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:[^A-Za-z0-9_$]|$)`)
+	kotlinTypeDefinitionPattern     = regexp.MustCompile(`^(?:class|interface|object)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:[^A-Za-z0-9_$]|$)`)
+	kotlinFunctionDefinitionPattern = regexp.MustCompile(`^fun\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(`)
+	identifierPattern               = regexp.MustCompile(`[A-Za-z_$][A-Za-z0-9_$]*`)
 )
 
 func Build(files []document.File) []Edge {
@@ -118,6 +123,10 @@ func languageForPath(filePath string) string {
 		return "go"
 	case ".py":
 		return "python"
+	case ".java":
+		return "java"
+	case ".kt", ".kts":
+		return "kotlin"
 	default:
 		return ""
 	}
@@ -156,8 +165,37 @@ func lineImportSpecifiers(language, line string) []string {
 			}
 			return result
 		}
+	case "java", "kotlin":
+		return jvmImportSpecifiers(language, line)
 	}
 	return nil
+}
+
+func jvmImportSpecifiers(language, line string) []string {
+	staticImport := false
+	target := ""
+	if language == "java" {
+		match := javaImportPattern.FindStringSubmatch(line)
+		if match == nil {
+			return nil
+		}
+		staticImport = match[1] != ""
+		target = match[2]
+	} else {
+		match := kotlinImportPattern.FindStringSubmatch(line)
+		if match == nil {
+			return nil
+		}
+		target = match[1]
+	}
+	parts := strings.Split(target, ".")
+	if staticImport {
+		if len(parts) < 2 {
+			return nil
+		}
+		parts = parts[:len(parts)-1]
+	}
+	return []string{strings.Join(parts, "/")}
 }
 
 func javascriptImportSpecifiers(lines []string) []string {
@@ -247,6 +285,15 @@ func exportedDefinition(language, line string) string {
 		pattern = goDefinitionPattern
 	case "python":
 		pattern = pythonDefinitionPattern
+	case "java":
+		pattern = javaDefinitionPattern
+	case "kotlin":
+		for _, candidate := range []*regexp.Regexp{kotlinTypeDefinitionPattern, kotlinFunctionDefinitionPattern} {
+			if match := candidate.FindStringSubmatch(line); match != nil {
+				return match[1]
+			}
+		}
+		return ""
 	}
 	if pattern == nil {
 		return ""
@@ -264,6 +311,7 @@ type pathResolver struct {
 	directories       map[string][]int
 	moduleSuffixes    map[string]suffixEntry
 	directorySuffixes map[string]suffixEntry
+	directoryFiles    map[string][]int
 }
 
 type suffixEntry struct {
@@ -274,6 +322,7 @@ type suffixEntry struct {
 func newResolver(files []document.File) pathResolver {
 	resolver := pathResolver{
 		files: files, modules: map[string][]int{}, directories: map[string][]int{},
+		directoryFiles: map[string][]int{},
 	}
 	for index, file := range files {
 		normalized := normalizePath(file.Path)
@@ -282,6 +331,9 @@ func newResolver(files []document.File) pathResolver {
 		resolver.addModule(withoutExtension, index)
 		directory := path.Dir(normalized)
 		resolver.directories[directory] = append(resolver.directories[directory], index)
+		for _, suffix := range pathSuffixes(directory) {
+			resolver.directoryFiles[suffix] = append(resolver.directoryFiles[suffix], index)
+		}
 		base := path.Base(withoutExtension)
 		if base == "index" || base == "__init__" {
 			resolver.addModule(path.Dir(withoutExtension), index)
@@ -320,6 +372,8 @@ func (r pathResolver) resolve(importer int, language, specifier string) []int {
 		if !ok {
 			return nil
 		}
+	case "java", "kotlin":
+		query = strings.TrimPrefix(query, "/")
 	default:
 		query = strings.TrimPrefix(query, "/")
 	}
@@ -329,6 +383,9 @@ func (r pathResolver) resolve(importer int, language, specifier string) []int {
 	}
 	if language == "go" {
 		return r.resolveDirectory(query, language)
+	}
+	if isJVMLanguage(language) && strings.HasSuffix(query, "/*") {
+		return r.resolveJVMDirectory(strings.TrimSuffix(query, "/*"), language)
 	}
 	return r.resolveModule(query, language)
 }
@@ -376,14 +433,27 @@ func (r pathResolver) resolveDirectory(query, language string) []int {
 	return r.filterLanguage(resolveUniqueSuffix(r.directories, r.directorySuffixes, query), language)
 }
 
+func (r pathResolver) resolveJVMDirectory(query, language string) []int {
+	return r.filterLanguage(r.directoryFiles[query], language)
+}
+
 func (r pathResolver) filterLanguage(indexes []int, language string) []int {
 	result := make([]int, 0, len(indexes))
 	for _, index := range indexes {
-		if index >= 0 && index < len(r.files) && languageForPath(r.files[index].Path) == language {
+		if index >= 0 && index < len(r.files) &&
+			languagesResolveTogether(language, languageForPath(r.files[index].Path)) {
 			result = append(result, index)
 		}
 	}
 	return result
+}
+
+func languagesResolveTogether(left, right string) bool {
+	return left == right || isJVMLanguage(left) && isJVMLanguage(right)
+}
+
+func isJVMLanguage(language string) bool {
+	return language == "java" || language == "kotlin"
 }
 
 func (r pathResolver) uniqueLanguageMatch(indexes []int, language string) []int {
