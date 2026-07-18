@@ -143,6 +143,7 @@ staging_max_files = 150
 fidelity_budget = 4000000
 reading_order = true
 cohort_dependencies = true
+step_order = true
 
 [viewer]
 collapse_threshold = 400

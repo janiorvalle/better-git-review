@@ -79,7 +79,10 @@ func TestMain(m *testing.M) {
 func TestStressSyntheticTiers(t *testing.T) {
 	requireStress(t)
 	tiers := []tierSpec{
-		{Name: "T1", Description: "5,000 small files / 10 dirs", TimeLimit: 15 * time.Second},
+		// 20s, not 15: T1 ran at 13-14s on review hardware since v1.2 and
+		// flaked under load at the v1.4 review — the owner-approved response
+		// is a budget bump, never a weaker fixture.
+		{Name: "T1", Description: "5,000 small files / 10 dirs", TimeLimit: 20 * time.Second},
 		{Name: "T2", Description: "300 files x 2,000 lines", TimeLimit: 60 * time.Second},
 		{Name: "T3", Description: "one 50MB file", TimeLimit: 60 * time.Second},
 		{Name: "T4", Description: "one 1MB minified line", TimeLimit: 15 * time.Second},

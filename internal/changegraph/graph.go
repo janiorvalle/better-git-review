@@ -525,7 +525,8 @@ func (r pathResolver) resolve(importer int, language, specifier string) []int {
 	if isJVMLanguage(language) && strings.HasSuffix(query, "/*") {
 		return r.resolveJVMDirectory(strings.TrimSuffix(query, "/*"), language)
 	}
-	return r.resolveModule(query, language, relative)
+	aliasSuffix := language == "javascript" && supportsBareAlias(r.files[importer].Path)
+	return r.resolveModule(query, language, relative, aliasSuffix)
 }
 
 func (r pathResolver) pythonModule(importer int, specifier string) (string, bool) {
@@ -551,7 +552,10 @@ func (r pathResolver) pythonModule(importer int, specifier string) (string, bool
 	return path.Join(base, remainder), true
 }
 
-func (r pathResolver) resolveModule(query, language string, relative bool) []int {
+func (r pathResolver) resolveModule(query, language string, relative, aliasSuffix bool) []int {
+	if aliasSuffix && !relative && !strings.Contains(query, "/") {
+		return nil
+	}
 	explicitExtension := path.Ext(query) != ""
 	if explicitExtension {
 		if matches := uniqueSorted(r.exactFiles[query]); len(matches) > 0 {
@@ -586,11 +590,32 @@ func (r pathResolver) resolveModule(query, language string, relative bool) []int
 			return r.uniqueModuleMatch(matches, language, true)
 		}
 	}
+	matches := r.uniqueModuleMatch(
+		resolveUniqueSuffix(r.modules, r.moduleSuffixes, withoutExtension),
+		language,
+		false,
+	)
+	if len(matches) > 0 || !aliasSuffix {
+		return matches
+	}
+	parts := strings.Split(withoutExtension, "/")
+	if strings.HasPrefix(parts[0], "@") || strings.HasPrefix(parts[0], "~") {
+		withoutExtension = strings.Join(parts[1:], "/")
+	}
 	return r.uniqueModuleMatch(
 		resolveUniqueSuffix(r.modules, r.moduleSuffixes, withoutExtension),
 		language,
 		false,
 	)
+}
+
+func supportsBareAlias(filePath string) bool {
+	switch strings.ToLower(path.Ext(filePath)) {
+	case ".js", ".jsx", ".ts", ".tsx":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r pathResolver) resolveDirectory(query, language string) []int {

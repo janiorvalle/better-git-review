@@ -46,6 +46,7 @@ type StagedPlan struct {
 	SummaryBatches []SummaryBatch
 	Calls          int
 	edges          []changegraph.Edge
+	dependencies   [][]int
 	settings       Settings
 }
 
@@ -58,6 +59,7 @@ type Settings struct {
 	StagingMaxFiles      int
 	ReadingOrder         bool
 	CohortDependencies   bool
+	StepOrder            bool
 }
 
 func DefaultSettings() Settings {
@@ -65,7 +67,7 @@ func DefaultSettings() Settings {
 		SummaryBatchMaxFiles: SummaryBatchMaxFiles, StageConcurrency: StageConcurrency,
 		DigestMaxFiles: DigestMaxFiles, DigestMaxChars: DigestMaxChars,
 		FileDiffCap: maxFileDiffCap, StagingMaxFiles: CohortMaxFiles,
-		ReadingOrder: true, CohortDependencies: true,
+		ReadingOrder: true, CohortDependencies: true, StepOrder: true,
 	}
 }
 
@@ -80,13 +82,27 @@ func PlanStagedWithSettings(files []document.File, generated map[int]bool, inclu
 	triage := Triage(files, generated, includeMechanical)
 	cohorts := PlanCohortsWithMax(files, settings.StagingMaxFiles)
 	var edges []changegraph.Edge
-	if settings.ReadingOrder || settings.CohortDependencies {
+	if settings.ReadingOrder || settings.CohortDependencies || settings.StepOrder {
 		edges = changegraph.Build(files)
 	}
 	if settings.ReadingOrder {
 		for index := range cohorts {
 			cohorts[index].Files = changegraph.StableOrder(cohorts[index].Files, edges)
 		}
+	}
+	var dependencies [][]int
+	if settings.StepOrder {
+		cohortFiles := make([][]int, len(cohorts))
+		for index, cohort := range cohorts {
+			cohortFiles[index] = cohort.Files
+		}
+		order, orderedDependencies := changegraph.StableCohortOrder(cohortFiles, edges)
+		ordered := make([]PlannedCohort, len(cohorts))
+		for index, original := range order {
+			ordered[index] = cohorts[original]
+		}
+		cohorts = ordered
+		dependencies = orderedDependencies
 	}
 	batches := PlanSummaryBatchesWithSettings(files, triage.ReviewWorthy, budget, settings)
 	return StagedPlan{
@@ -95,6 +111,7 @@ func PlanStagedWithSettings(files []document.File, generated map[int]bool, inclu
 		SummaryBatches: batches,
 		Calls:          len(batches) + len(cohorts) + 1,
 		edges:          edges,
+		dependencies:   dependencies,
 		settings:       settings,
 	}
 }
@@ -440,7 +457,11 @@ func AssembleStagedAnalysis(
 	}
 	dependencies := make([][]int, len(plan.Cohorts))
 	if plan.settings.CohortDependencies {
-		dependencies = changegraph.CohortDependencies(cohortFiles, plan.edges)
+		if plan.settings.StepOrder {
+			dependencies = plan.dependencies
+		} else {
+			dependencies = changegraph.CohortDependencies(cohortFiles, plan.edges)
+		}
 	} else {
 		for index := range dependencies {
 			dependencies[index] = []int{}
