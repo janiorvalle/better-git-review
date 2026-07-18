@@ -405,6 +405,81 @@ index 1111111..2222222 100644
 	}
 }
 
+func TestGeneratedAttributesFallBackOnGitWithoutSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake git shim is Unix-only")
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	repo := initializeRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"),
+		[]byte("*.gen linguist-generated=true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "asset.gen"), []byte("generated base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "add generated asset")
+	runGit(t, repo, "switch", "-c", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "asset.gen"), []byte("generated feature\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("review-worthy feature\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "change generated and source files")
+
+	shimDir := t.TempDir()
+	shim := filepath.Join(shimDir, "git")
+	script := `#!/bin/sh
+check_attr=false
+source_option=false
+for arg in "$@"; do
+  if [ "$arg" = "check-attr" ]; then check_attr=true; fi
+  case "$arg" in --source=*) source_option=true ;; esac
+done
+if [ "$check_attr" = true ] && [ "$source_option" = true ]; then
+  printf '%s\n' 'error: unknown option source=main' >&2
+  printf '%s\n' 'usage: git check-attr [--source <tree-ish>] --stdin' >&2
+  printf '%s\n' '    --source <tree-ish>  which tree-ish to check attributes at' >&2
+  exit 129
+fi
+exec "$BGR_E2E_REAL_GIT" "$@"
+`
+	if err := os.WriteFile(shim, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env := setEnv(isolatedEnvironment(t), "BGR_STAGE_BUDGET", "1")
+	env = setEnv(env, "BGR_E2E_REAL_GIT", realGit)
+	env = setEnv(env, "PATH", shimDir+string(os.PathListSeparator)+envValue(env, "PATH"))
+	output := filepath.Join(t.TempDir(), "fallback.json")
+	result := runCLI(t, env, nil,
+		"-C", repo, "--base", "main", "--provider", "mock", "--no-cache",
+		"--format", "json", "--out", output)
+	if result.err != nil {
+		t.Fatalf("fallback run failed: %v\n%s", result.err, result.stderr)
+	}
+	doc := readAndValidate(t, output)
+	mechanical := map[string]bool{}
+	for _, index := range doc.Analysis.MechanicalFiles {
+		mechanical[doc.Files[index].Path] = true
+	}
+	if !mechanical["asset.gen"] || mechanical["base.txt"] {
+		t.Fatalf("fallback mechanical files = %#v", mechanical)
+	}
+	const fallbackLog = "could not read attributes from the reviewed commit; using worktree attributes"
+	if strings.Count(result.stderr, fallbackLog) != 1 {
+		t.Fatalf("fallback log count is not one:\n%s", result.stderr)
+	}
+	if strings.Contains(result.stderr, "usage: git check-attr") || strings.Contains(result.stderr, "which tree-ish") {
+		t.Fatalf("git usage text leaked into progress output:\n%s", result.stderr)
+	}
+}
+
 func TestDelimiterInjectionIsNeutralized(t *testing.T) {
 	env := isolatedEnvironment(t)
 	promptLog := filepath.Join(t.TempDir(), "prompt.log")
