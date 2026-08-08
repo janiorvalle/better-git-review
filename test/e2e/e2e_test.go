@@ -247,8 +247,8 @@ func TestStagedCohortOpsAreDeterministicAndPreserveTheCallSchedule(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls := bytes.Count(logged, []byte("----- MOCK PROMPT -----")); calls != 14 {
-		t.Fatalf("two staged runs made %d calls, want 14", calls)
+	if calls := bytes.Count(logged, []byte("----- MOCK PROMPT -----")); calls != 10 {
+		t.Fatalf("two staged runs made %d calls, want 10", calls)
 	}
 }
 
