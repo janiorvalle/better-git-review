@@ -243,7 +243,9 @@ stubbed without changing the remaining schedule. Scripts pass `--yes`.
 
 `bgr` ships an agent skill that teaches Claude Code or Codex when and how
 to use it (`--format json`, cohort-by-cohort review, the etiquette). Install
-it from `bgr configure` — it's opt-in, never automatic.
+it with `bgr install-skill`, or from `bgr configure` — it's opt-in, never
+automatic. `install-skill` takes `--claude` or `--codex` to pick one harness
+and is safe to rerun, so setup scripts can call it.
 
 ## Development
 
