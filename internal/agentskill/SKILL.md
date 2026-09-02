@@ -29,6 +29,7 @@ structure instead of a flat wall of files.
   humans; stderr progress text is not a stable interface — never parse it.
 - Pass `--yes` on any run that might stage (large diffs trigger a cost
   guard above 5 provider calls, and a non-TTY run without `--yes` fails).
+- `bgr install-skill` is the non-interactive way to install this skill.
 - Never use `-i` (the interactive picker) or `bgr configure` from an agent
   run; both are interactive. Edit config files directly instead.
 - Don't pass `--no-cache` without a concrete reason. Analysis is cached on

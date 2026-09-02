@@ -71,6 +71,9 @@ type options struct {
 
 func Run(ctx context.Context, args []string, env Environment) error {
 	env = fillEnvironment(env)
+	if len(args) > 0 && args[0] == "install-skill" {
+		return runInstallSkill(args[1:], env)
+	}
 	stdinIsTTY := ttyValue(env.StdinTTY, isTTY(env.Stdin))
 	stderrIsTTY := ttyValue(env.StderrTTY, isWriterTTY(env.Stderr))
 	if _, ok := env.Stdin.(*bufio.Reader); !ok {
@@ -821,6 +824,7 @@ USAGE
   bgr [PR_NUMBER] [flags]
 	bgr -i [query]
 	bgr configure
+	bgr install-skill      Install the agent skill without prompts (--claude, --codex, --home)
 
 SOURCES
   PR_NUMBER              GitHub PR via gh
