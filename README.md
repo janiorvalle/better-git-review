@@ -25,9 +25,13 @@ macOS or Linux — the installer verifies checksums and writes to
 curl -fsSL https://raw.githubusercontent.com/janiorvalle/better-git-review/main/install.sh | sh
 ```
 
-Windows — grab the zip from
-[Releases](https://github.com/janiorvalle/better-git-review/releases) and put
-`bgr.exe` on your `PATH`.
+Windows — the same checks in PowerShell, and `bgr.exe` and
+`better-git-review.exe` land in `%LOCALAPPDATA%\Programs\bgr` on your user
+PATH (override with `BGR_INSTALL_DIR`):
+
+```powershell
+irm https://raw.githubusercontent.com/janiorvalle/better-git-review/main/install.ps1 | iex
+```
 
 Go users:
 
