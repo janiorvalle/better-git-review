@@ -98,6 +98,10 @@ jobs:
       - run: go vet ./...
       # Includes the subprocess e2e package on real macOS and Windows hosts.
       - run: go test ./...
+      - name: Installer smoke
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: .\scripts\install-smoke.ps1
 
   install-smoke:
     name: Installer smoke
